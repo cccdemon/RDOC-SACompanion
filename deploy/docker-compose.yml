@@ -1,0 +1,37 @@
+# RDOC-SACompanion server side: InitConnection (signaling) + coturn (NAT relay).
+# Media never touches these beyond TURN-relayed (encrypted) SRTP. Untested
+# scaffold — fill .env + certs before first deploy.
+#
+# .env needs: ROOM_AUTH_SECRET, TURN_SECRET, PUBLIC_HOST (FQDN of this server).
+# static-auth-secret in turnserver.conf MUST equal TURN_SECRET.
+# certs/: init-cert.pem + init-key.pem (init auto-generates on first run if the
+# volume is writable; coturn reuses them for turns://).
+
+services:
+  init:
+    build:
+      context: ..
+      dockerfile: server/init/Dockerfile
+    restart: unless-stopped
+    environment:
+      - ROOM_AUTH_SECRET=${ROOM_AUTH_SECRET}
+      - TURN_SECRET=${TURN_SECRET}
+      - TURN_URLS=turns:${PUBLIC_HOST}:5349
+      - TLS_CERT=/certs/init-cert.pem
+      - TLS_KEY=/certs/init-key.pem
+      - TLS_SAN=${PUBLIC_HOST}
+    volumes:
+      - ./certs:/certs
+    ports:
+      - "8080:8080"
+
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    # Host networking: WebRTC/TURN relay needs the real source ports (docker
+    # NAT rewrites them and breaks ICE). Same gotcha as LiveKit.
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./certs:/certs:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]

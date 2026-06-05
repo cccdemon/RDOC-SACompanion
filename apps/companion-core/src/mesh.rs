@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -18,6 +18,7 @@ use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
+use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::track::track_local::track_local_static_sample::TrackLocalStaticSample;
@@ -131,11 +132,20 @@ impl Mesh {
             })
         }));
 
-        // Connection-state visibility (connected = ICE+DTLS up).
+        // Connection-state + transparency badge (DIREKT vs RELAY/TURN).
         let pid_s = peer.to_string();
+        let pc_state = Arc::clone(&pc);
         pc.on_peer_connection_state_change(Box::new(move |s| {
-            println!("[peer {pid_s}: {s:?}]");
-            Box::pin(async {})
+            let pid_s = pid_s.clone();
+            let pc_state = Arc::clone(&pc_state);
+            Box::pin(async move {
+                println!("[peer {pid_s}: {s:?}]");
+                if s == RTCPeerConnectionState::Connected {
+                    if let Some(kind) = selected_kind(&pc_state).await {
+                        println!("[peer {pid_s}: VERBINDUNG {kind}]");
+                    }
+                }
+            })
         }));
 
         // Remote audio track → decode pipeline.
@@ -240,6 +250,25 @@ impl Mesh {
             }
         }
     }
+}
+
+/// Classify the live connection from the selected ICE candidate pair:
+/// any `relay` candidate → via TURN, else direct. Retries briefly because the
+/// pair can lag the Connected state. (ARCHITECTURE §9 transparency.)
+async fn selected_kind(pc: &RTCPeerConnection) -> Option<&'static str> {
+    let sctp = pc.sctp();
+    let dtls = sctp.transport();
+    let ice = dtls.ice_transport();
+    for _ in 0..10 {
+        if let Some(pair) = ice.get_selected_candidate_pair().await {
+            // Pair fields are private; its Display lists each candidate's type
+            // ("host"/"srflx"/"prflx"/"relay"). A relay candidate ⇒ via TURN.
+            let relay = format!("{pair}").contains("relay");
+            return Some(if relay { "RELAY (TURN)" } else { "DIREKT" });
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    None
 }
 
 async fn read_track(track: Arc<TrackRemote>, peer: String, dtx: DecodeTx) {

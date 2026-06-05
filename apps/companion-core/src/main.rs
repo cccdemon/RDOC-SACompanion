@@ -49,6 +49,11 @@ fn build_api() -> Result<API> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Pin the rustls crypto provider (ring) process-wide so webrtc-rs DTLS and
+    // our wss client don't trip the "ambiguous provider" panic when multiple
+    // rustls backends are in the dep graph.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
+
+const PTT_KEY = "F8";
 
 type Participant = {
   user_id: string;
@@ -24,12 +27,14 @@ export default function App() {
   const [chat, setChat] = useState<ChatLine[]>([]);
   const [log, setLog] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const [form, setForm] = useState({
-    server: "ws://127.0.0.1:8080/ws",
-    room: "op1",
-    name: "",
-    token: "",
-    certSha256: "",
+  const [form, setForm] = useState(() => {
+    try {
+      const s = localStorage.getItem("sa.form");
+      if (s) return JSON.parse(s);
+    } catch {
+      /* ignore */
+    }
+    return { server: "ws://127.0.0.1:8080/ws", room: "op1", name: "", token: "", certSha256: "" };
   });
   const [msg, setMsg] = useState("");
   const chatEnd = useRef<HTMLDivElement>(null);
@@ -54,9 +59,25 @@ export default function App() {
     chatEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
 
+  // Hold-to-talk global hotkey while connected: press = transmit, release = stop.
+  useEffect(() => {
+    if (!connected) return;
+    register(PTT_KEY, (e: { state: string }) => {
+      invoke("set_transmit", { on: e.state === "Pressed" });
+    }).catch(() => {});
+    return () => {
+      unregister(PTT_KEY).catch(() => {});
+    };
+  }, [connected]);
+
   const onConnect = async () => {
     setLog("");
     setConnecting(true);
+    try {
+      localStorage.setItem("sa.form", JSON.stringify(form));
+    } catch {
+      /* ignore */
+    }
     const name = form.name.trim() || "Commander";
     const userId = crypto.randomUUID().slice(0, 8);
     try {
@@ -134,7 +155,8 @@ export default function App() {
             </div>
           ))}
           <button className={`ptt ${transmitting ? "live" : ""}`} onClick={ptt}>
-            {transmitting ? "● SENDEN AKTIV — klick zum Stoppen" : "PUSH TO TALK — klick zum Senden"}
+            {transmitting ? "● SENDEN AKTIV" : "PUSH TO TALK"}
+            <span className="ptthint">{PTT_KEY} halten · oder klick zum Umschalten</span>
           </button>
         </section>
 

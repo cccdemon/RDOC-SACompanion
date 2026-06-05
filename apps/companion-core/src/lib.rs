@@ -67,6 +67,7 @@ pub struct EngineConfig {
 
 enum Cmd {
     ToggleTx,
+    SetTx(bool),
     Chat(String),
 }
 
@@ -77,6 +78,10 @@ pub struct Engine {
 impl Engine {
     pub fn toggle_transmit(&self) {
         let _ = self.cmd_tx.send(Cmd::ToggleTx);
+    }
+    /// Hold-to-talk: set transmit explicitly (idempotent).
+    pub fn set_transmit(&self, on: bool) {
+        let _ = self.cmd_tx.send(Cmd::SetTx(on));
     }
     pub fn send_chat(&self, text: String) {
         let _ = self.cmd_tx.send(Cmd::Chat(text));
@@ -254,6 +259,14 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                             let _ = out.send(ClientMsg::Ptt { active: n });
                             sink(UiEvent::Status { connected: true, transmitting: n });
                             emit_roster(&sink, &members, &me_id, &me_name, n);
+                        }
+                        Some(Cmd::SetTx(on)) => {
+                            if transmit.load(Ordering::SeqCst) != on {
+                                transmit.store(on, Ordering::SeqCst);
+                                let _ = out.send(ClientMsg::Ptt { active: on });
+                                sink(UiEvent::Status { connected: true, transmitting: on });
+                                emit_roster(&sink, &members, &me_id, &me_name, on);
+                            }
                         }
                         Some(Cmd::Chat(t)) => {
                             mesh.broadcast_chat(&t).await;

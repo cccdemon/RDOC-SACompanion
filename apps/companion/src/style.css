@@ -105,6 +105,8 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 }
 .ptt:hover { background: #102028; }
 .ptt.live { background: var(--red); border-color: var(--red); color: #fff; }
+.ptthint { display: block; margin-top: 6px; font-size: 10px; font-weight: 400; letter-spacing: 0.5px; color: var(--dim); }
+.ptt.live .ptthint { color: rgba(255, 255, 255, 0.7); }
 
 .chat { min-height: 0; }
 .chatlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }

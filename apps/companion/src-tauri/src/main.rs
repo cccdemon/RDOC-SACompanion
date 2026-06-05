@@ -44,6 +44,13 @@ fn toggle_transmit(state: State<AppState>) {
 }
 
 #[tauri::command]
+fn set_transmit(state: State<AppState>, on: bool) {
+    if let Some(e) = state.engine.lock().unwrap().as_ref() {
+        e.set_transmit(on);
+    }
+}
+
+#[tauri::command]
 fn send_chat(state: State<AppState>, text: String) {
     if let Some(e) = state.engine.lock().unwrap().as_ref() {
         e.send_chat(text);
@@ -52,8 +59,14 @@ fn send_chat(state: State<AppState>, text: String) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState { engine: Mutex::new(None) })
-        .invoke_handler(tauri::generate_handler![connect, toggle_transmit, send_chat])
+        .invoke_handler(tauri::generate_handler![
+            connect,
+            toggle_transmit,
+            set_transmit,
+            send_chat
+        ])
         .run(tauri::generate_context!())
         .expect("error running tauri app");
 }

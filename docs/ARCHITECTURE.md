@@ -374,7 +374,7 @@ dann TURN, dann Mesh, **UI/Branding zuletzt**. Jede Phase ist für sich testbar.
 | 2 ◑ | **Verbindungs-Badge DIREKT/RELAY = DONE** (aus ICE selected-pair, DIREKT auf Loopback verifiziert). TURN-Creds-Plumbing (Init mint + Client add) DONE. **Offen: coturn-Deploy** (deploy/ Scaffold da, ungetestet) + echter RELAY-Nachweis am Server. | Badge ✅ · coturn-Deploy offen |
 | 3 ✓ | **DONE (Connection-Level).** 4er-Full-Mesh verifiziert: jede Instanz mit allen 3 Peers Connected (DIREKT), vollständiges Roster (`[Teilnehmer 4]`), Mixer mischt Partial-Frames mehrerer Sprecher. Audio-Mix-Qualität bei N = manueller Hör-Test. | ✅ 4 verbunden + alle sichtbar |
 | 4 | **AEC/APM** (`webrtc-audio-processing`) im Capture-Pfad; ohne-Headset-Test. | kein Echo über Speaker |
-| 5 | **UI/Branding** (kit.css): Roster, PTT-Anzeige, Badges, Settings. | bedienbar |
+| 5 ◑ | **UI DONE (Code).** Core zu `companion_core`-Lib refactored (Engine + UiEvent-Sink; Headless-Bin bleibt). Tauri-App `apps/companion` (React, RDOC-Theme): Connect-Screen, Roster mit DIREKT/RELAY-Badges + Sprech-Dots, Push-to-Talk, Chat. **Offen: `pnpm tauri dev` Build/Test beim User** (Tauri-Toolchain) + Icons/Branding-Politur. | UI gebaut · Build-Test offen |
 | 6 | Härtung: Reconnect (Init-Restart-Überleben), Device-Hotswap, Cap-Verhalten, Last-Test Richtung 12-16. | release-fähig |
 
 **Cap (entschieden 2026-06-05):** MVP **warn@12 / hard@16**. Ziel-Ceiling 24 erst nach

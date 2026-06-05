@@ -2,7 +2,7 @@
 resolver = "2"
 members = ["crates/protocol", "server/init", "apps/companion-core"]
 # Spikes are standalone throwaway crates — keep them out of the workspace.
-exclude = ["spikes/track-fanout", "spikes/audio-roundtrip"]
+exclude = ["spikes/track-fanout", "spikes/audio-roundtrip", "apps/companion/src-tauri"]
 
 [workspace.package]
 edition = "2021"

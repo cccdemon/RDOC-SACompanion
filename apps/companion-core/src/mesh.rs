@@ -12,6 +12,8 @@ use anyhow::Result;
 use bytes::Bytes;
 use protocol::{ChatMsg, ClientMsg};
 use tokio::sync::mpsc::UnboundedSender;
+
+use crate::MeshEvent;
 use webrtc::api::API;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
@@ -55,14 +57,16 @@ impl PeerConn {
     }
 }
 
-/// Print incoming chat (sender = the channel's peer) and stash the channel.
-fn wire_chat(peer: String, slot: ChatSlot, dc: Arc<RTCDataChannel>) {
+/// Forward incoming chat (sender = the channel's peer) to the engine and stash
+/// the channel.
+fn wire_chat(peer: String, slot: ChatSlot, dc: Arc<RTCDataChannel>, events: UnboundedSender<MeshEvent>) {
     let p = peer.clone();
     dc.on_message(Box::new(move |msg: DataChannelMessage| {
         let p = p.clone();
+        let events = events.clone();
         Box::pin(async move {
             if let Ok(c) = serde_json::from_slice::<ChatMsg>(&msg.data) {
-                println!("[chat {p}] {}", c.text);
+                let _ = events.send(MeshEvent::Chat { from: p, text: c.text });
             }
         })
     }));
@@ -77,6 +81,7 @@ pub struct Mesh {
     decode_tx: DecodeTx,
     ice_servers: Vec<RTCIceServer>,
     peers: HashMap<String, PeerConn>,
+    events: UnboundedSender<MeshEvent>,
 }
 
 impl Mesh {
@@ -86,12 +91,13 @@ impl Mesh {
         my_id: String,
         out: UnboundedSender<ClientMsg>,
         decode_tx: DecodeTx,
+        events: UnboundedSender<MeshEvent>,
     ) -> Self {
         let ice_servers = vec![RTCIceServer {
             urls: vec!["stun:stun.l.google.com:19302".to_owned()],
             ..Default::default()
         }];
-        Self { api, local, my_id, out, decode_tx, ice_servers, peers: HashMap::new() }
+        Self { api, local, my_id, out, decode_tx, ice_servers, peers: HashMap::new(), events }
     }
 
     pub fn add_turn(&mut self, urls: Vec<String>, username: String, credential: String) {
@@ -135,15 +141,15 @@ impl Mesh {
         // Connection-state + transparency badge (DIREKT vs RELAY/TURN).
         let pid_s = peer.to_string();
         let pc_state = Arc::clone(&pc);
+        let ev_state = self.events.clone();
         pc.on_peer_connection_state_change(Box::new(move |s| {
             let pid_s = pid_s.clone();
             let pc_state = Arc::clone(&pc_state);
+            let ev_state = ev_state.clone();
             Box::pin(async move {
-                println!("[peer {pid_s}: {s:?}]");
                 if s == RTCPeerConnectionState::Connected {
-                    if let Some(kind) = selected_kind(&pc_state).await {
-                        println!("[peer {pid_s}: VERBINDUNG {kind}]");
-                    }
+                    let badge = selected_kind(&pc_state).await.unwrap_or("DIREKT").to_string();
+                    let _ = ev_state.send(MeshEvent::Badge { peer: pid_s, badge });
                 }
             })
         }));
@@ -163,11 +169,13 @@ impl Mesh {
         let chat: ChatSlot = Arc::new(Mutex::new(None));
         let chat_h = chat.clone();
         let pid2 = peer.to_string();
+        let ev_chat = self.events.clone();
         pc.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
             let chat_h = chat_h.clone();
             let pid2 = pid2.clone();
+            let ev_chat = ev_chat.clone();
             Box::pin(async move {
-                wire_chat(pid2, chat_h, dc);
+                wire_chat(pid2, chat_h, dc, ev_chat);
             })
         }));
 
@@ -197,7 +205,7 @@ impl Mesh {
         let p = self.peers.get(peer).unwrap();
         // Offerer creates the chat channel (must exist before the offer).
         let dc = p.pc.create_data_channel("chat", None).await?;
-        wire_chat(peer.to_string(), p.chat.clone(), dc);
+        wire_chat(peer.to_string(), p.chat.clone(), dc, self.events.clone());
 
         let offer = p.pc.create_offer(None).await?;
         p.pc.set_local_description(offer.clone()).await?;

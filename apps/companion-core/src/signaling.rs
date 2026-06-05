@@ -73,10 +73,8 @@ impl ServerCertVerifier for PinnedCert {
     }
 }
 
-fn pinned_connector() -> Result<Connector> {
-    let hex = std::env::var("CERT_SHA256")
-        .map_err(|_| anyhow!("wss:// braucht CERT_SHA256 (Fingerprint vom Server-Start) zum Pinnen"))?;
-    let bytes = hex::decode(hex.trim()).map_err(|_| anyhow!("CERT_SHA256 ist kein gültiges Hex"))?;
+fn pinned_connector(cert_sha256: &str) -> Result<Connector> {
+    let bytes = hex::decode(cert_sha256.trim()).map_err(|_| anyhow!("CERT_SHA256 ist kein gültiges Hex"))?;
     if bytes.len() != 32 {
         bail!("CERT_SHA256 muss 32 Byte (64 Hex-Zeichen) sein");
     }
@@ -91,9 +89,11 @@ fn pinned_connector() -> Result<Connector> {
     Ok(Connector::Rustls(Arc::new(config)))
 }
 
-pub async fn connect(url: &str) -> Result<Signaling> {
+pub async fn connect(url: &str, cert_sha256: Option<&str>) -> Result<Signaling> {
     let ws = if url.starts_with("wss://") {
-        let connector = pinned_connector()?;
+        let pin = cert_sha256
+            .ok_or_else(|| anyhow!("wss:// braucht CERT_SHA256 (Fingerprint vom Server-Start) zum Pinnen"))?;
+        let connector = pinned_connector(pin)?;
         let (ws, _) =
             tokio_tungstenite::connect_async_tls_with_config(url, None, false, Some(connector))
                 .await?;

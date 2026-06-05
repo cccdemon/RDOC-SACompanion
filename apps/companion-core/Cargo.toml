@@ -6,12 +6,17 @@ edition.workspace = true
 # Headless 2-peer (→ N-peer) mesh client: cpal+opus audio over webrtc-rs P2P,
 # per-peer DataChannel chat, signaling to InitConnection. UI comes later.
 
+[lib]
+name = "companion_core"
+path = "src/lib.rs"
+
 [[bin]]
 name = "companion-core"
 path = "src/main.rs"
 
 [dependencies]
 protocol = { path = "../../crates/protocol" }
+serde = { version = "1", features = ["derive"] }
 webrtc = "0.11"
 audiopus = "0.2"
 cpal = "0.15"

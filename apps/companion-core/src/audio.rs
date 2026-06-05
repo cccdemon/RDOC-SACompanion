@@ -241,9 +241,13 @@ pub fn mixer_loop(mix: MixMap, play: Buf, out_rate: u32) {
         {
             let mut m = mix.lock().unwrap();
             for b in m.values_mut() {
-                if b.len() >= FRAME {
+                // Take up to one frame; a partially-filled peer contributes what
+                // it has (rest = silence) instead of being dropped → smoother
+                // mix with several simultaneous speakers.
+                let n = b.len().min(FRAME);
+                if n > 0 {
                     any = true;
-                    for x in mixed.iter_mut() {
+                    for x in mixed.iter_mut().take(n) {
                         *x += b.pop_front().unwrap() as i32;
                     }
                 }

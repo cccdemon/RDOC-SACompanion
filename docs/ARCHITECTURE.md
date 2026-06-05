@@ -372,7 +372,7 @@ dann TURN, dann Mesh, **UI/Branding zuletzt**. Jede Phase ist für sich testbar.
 | 1 ✓ | **DONE (2026-06-05).** 1:1 echtes Audio: cpal→opus→webrtc-rs→decode→cpal, InitConnection (Join/Roster/SDP/ICE-Relay + Room-Auth + Glare). Verifiziert: 2 Instanzen hören sich, PeerConnection Connected. | ✅ 2 Leute hören sich |
 | 1b ✓ | **DONE.** Chat (DataChannel, verschlüsselt) + **Signaling-TLS**: Init serviert `wss://` (rcgen self-signed, persistiert, druckt SHA-256), Client pinnt via `CERT_SHA256`; falscher Pin → abgelehnt (verifiziert). `ws://` nur Loopback. `TLS_DISABLE=1` für ws-Loopback-Dev. | ✅ voll verschlüsselt |
 | 2 ◑ | **Verbindungs-Badge DIREKT/RELAY = DONE** (aus ICE selected-pair, DIREKT auf Loopback verifiziert). TURN-Creds-Plumbing (Init mint + Client add) DONE. **Offen: coturn-Deploy** (deploy/ Scaffold da, ungetestet) + echter RELAY-Nachweis am Server. | Badge ✅ · coturn-Deploy offen |
-| 3 | **4er-Mesh:** N-Peer Join/Leave, Renegotiation, Mixer-Port (relay-bots-Logik) + Jitter-Buffer, vollständiges Roster. | 4 Leute, sauberer Mix, alle sichtbar |
+| 3 ✓ | **DONE (Connection-Level).** 4er-Full-Mesh verifiziert: jede Instanz mit allen 3 Peers Connected (DIREKT), vollständiges Roster (`[Teilnehmer 4]`), Mixer mischt Partial-Frames mehrerer Sprecher. Audio-Mix-Qualität bei N = manueller Hör-Test. | ✅ 4 verbunden + alle sichtbar |
 | 4 | **AEC/APM** (`webrtc-audio-processing`) im Capture-Pfad; ohne-Headset-Test. | kein Echo über Speaker |
 | 5 | **UI/Branding** (kit.css): Roster, PTT-Anzeige, Badges, Settings. | bedienbar |
 | 6 | Härtung: Reconnect (Init-Restart-Überleben), Device-Hotswap, Cap-Verhalten, Last-Test Richtung 12-16. | release-fähig |

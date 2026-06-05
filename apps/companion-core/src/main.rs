@@ -39,6 +39,15 @@ fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
 
+/// Print the full participant list (peers + self) — every member always sees
+/// who is in the room (ARCHITECTURE §9 transparency).
+fn show_roster(roster: &HashMap<String, String>, me: &str) {
+    let mut names: Vec<String> = roster.values().cloned().collect();
+    names.sort();
+    let others = if names.is_empty() { String::new() } else { format!(", {}", names.join(", ")) };
+    println!("[Teilnehmer {}]: {me} (du){others}", roster.len() + 1);
+}
+
 fn build_api() -> Result<API> {
     let mut m = MediaEngine::default();
     m.register_default_codecs()?;
@@ -154,6 +163,7 @@ async fn main() -> Result<()> {
     println!("   '/t' + ENTER = Senden an/aus (PTT) · sonst = Chat an alle · Strg+C beendet");
 
     let mut mesh = Mesh::new(api, local, user.clone(), out.clone(), decode_tx);
+    let mut roster: HashMap<String, String> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -161,16 +171,18 @@ async fn main() -> Result<()> {
                 let Some(msg) = msg else { eprintln!("[signaling closed]"); break; };
                 match msg {
                     ServerMsg::Roster { peers } => {
-                        let names: Vec<String> = peers.iter().map(|p| p.name.clone()).collect();
-                        println!("[roster] {} Teilnehmer: {:?}", peers.len(), names);
+                        roster = peers.iter().map(|p| (p.user_id.clone(), p.name.clone())).collect();
+                        show_roster(&roster, &name);
                         for p in peers { let _ = mesh.on_peer(&p.user_id).await; }
                     }
-                    ServerMsg::PeerJoined { user_id, name } => {
-                        println!("[+ {name} ({user_id})]");
+                    ServerMsg::PeerJoined { user_id, name: pname } => {
+                        roster.insert(user_id.clone(), pname);
+                        show_roster(&roster, &name);
                         let _ = mesh.on_peer(&user_id).await;
                     }
                     ServerMsg::PeerLeft { user_id } => {
-                        println!("[- {user_id}]");
+                        roster.remove(&user_id);
+                        show_roster(&roster, &name);
                         mesh.on_left(&user_id).await;
                     }
                     ServerMsg::Offer { from, sdp } => { let _ = mesh.on_offer(&from, sdp).await; }

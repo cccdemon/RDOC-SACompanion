@@ -19,6 +19,7 @@ protocol = { path = "../../crates/protocol" }
 serde = { version = "1", features = ["derive"] }
 webrtc = "0.11"
 audiopus = "0.2"
+nnnoiseless = { version = "0.5", default-features = false }
 cpal = "0.15"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }

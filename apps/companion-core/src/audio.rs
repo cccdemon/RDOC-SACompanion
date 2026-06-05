@@ -11,6 +11,7 @@ use anyhow::{anyhow, Result};
 use audiopus::coder::{Decoder, Encoder};
 use audiopus::{Application, Channels, SampleRate};
 use bytes::Bytes;
+use nnnoiseless::DenoiseState;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -173,13 +174,22 @@ pub fn run_devices(cap: Buf, play: Buf, rate_tx: std::sync::mpsc::Sender<(u32, u
     }
 }
 
-/// Capture → resample(in→48k) → 20ms frame → (if transmitting) Opus encode →
-/// send encoded frame to the WebRTC writer task.
+/// Capture → resample(in→48k) → RNNoise noise-suppression (10ms blocks) →
+/// 20ms frame → (if transmitting) Opus encode → WebRTC writer task.
+///
+/// RNNoise removes background noise (fan, keyboard, hum). It is NOT echo
+/// cancellation — without a headset, speaker echo still leaks; full APM-AEC
+/// (libwebrtc) doesn't build on Windows-MSVC, so headset stays recommended.
 pub fn encode_loop(cap: Buf, in_rate: u32, transmit: Arc<AtomicBool>, opus_tx: UnboundedSender<Bytes>) {
+    const NS: usize = DenoiseState::FRAME_SIZE; // 480 = 10ms @ 48k
     let enc = Encoder::new(SampleRate::Hz48000, Channels::Mono, Application::Voip)
         .expect("opus encoder");
     let mut up = Resampler::new(in_rate, OPUS_SR);
-    let mut buf48: Vec<f32> = Vec::new();
+    let mut den = DenoiseState::new();
+    let mut buf48: Vec<f32> = Vec::new(); // post-resample, −1..1
+    let mut den_in = [0f32; NS];
+    let mut den_out = [0f32; NS];
+    let mut clean: Vec<f32> = Vec::new(); // post-denoise, −1..1
     let mut frame = [0i16; FRAME];
     let mut encoded = [0u8; 4000];
     loop {
@@ -196,8 +206,18 @@ pub fn encode_loop(cap: Buf, in_rate: u32, transmit: Arc<AtomicBool>, opus_tx: U
             continue;
         }
         up.process(&chunk, &mut buf48);
-        while buf48.len() >= FRAME {
-            for (i, s) in buf48.drain(..FRAME).enumerate() {
+        // Denoise in 10ms blocks. RNNoise works in i16-scaled f32.
+        while buf48.len() >= NS {
+            for (i, s) in buf48.drain(..NS).enumerate() {
+                den_in[i] = s * 32768.0;
+            }
+            den.process_frame(&mut den_out, &den_in);
+            for s in den_out.iter() {
+                clean.push((s / 32768.0).clamp(-1.0, 1.0));
+            }
+        }
+        while clean.len() >= FRAME {
+            for (i, s) in clean.drain(..FRAME).enumerate() {
                 frame[i] = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
             }
             if transmit.load(Ordering::SeqCst) {

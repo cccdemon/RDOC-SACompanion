@@ -218,6 +218,25 @@ Pro Peer ein **Verbindungs-Badge**, abgeleitet aus dem **ICE selected candidate-
 - Wechselt der Pair-Typ live (ICE-Restart) → Badge updaten.
 - Nutzer sieht **immer**, ob seine Stimme direkt oder über TURN geht. Erfüllt „muss
   ersichtlich sein".
+- **Teilnehmer-Transparenz (Pflicht):** Jeder Teilnehmer sieht **immer die vollständige
+  Teilnehmerliste**. Init broadcastet `roster` (beim Join) + `peer-joined`/`peer-left`; der
+  Client rendert die komplette Liste mit Name + Verbindungs-Badge. **Keine versteckten
+  Teilnehmer** — wer im Room ist, ist für alle sichtbar.
+
+---
+
+## 9b. RTC Text-Chat
+
+Text-Chat läuft über einen **WebRTC DataChannel pro Peer** (SCTP über DTLS — **gleich
+verschlüsselt wie Audio**, end-to-end peerweise). Label `chat`, ordered + reliable.
+
+- **Geht NICHT über InitConnection** → der Server sieht den Chat nie (bleibt medienblind).
+- Mesh-Broadcast: ein Sender schickt seine Nachricht über **alle** seine DataChannels; der
+  Empfänger kennt den Absender = der Peer, dem der Channel gehört (kein Spoofing über den Server).
+- Nachrichtenformat (`protocol::ChatMsg`): `{ text, ts }`. Absender-Identität ergibt sich aus
+  dem Channel, nicht aus dem Payload.
+- DataChannel-Aufbau: der Offerer (kleinere userId, Glare-Regel) erstellt den Channel
+  (`create_data_channel("chat")`); die Gegenseite nimmt ihn via `on_data_channel` an.
 
 ---
 
@@ -240,6 +259,22 @@ Full-Mesh: `N·(N-1)/2` Links, jeder uploaded `(N-1)×`.
 ---
 
 ## 11. Sicherheit & Privacy
+
+**Grundsatz: „Nichts verlässt unverschlüsselt den Rechner."** Jede ausgehende Verbindung ist
+verschlüsselt:
+
+| Pfad | Verschlüsselung | Status |
+|---|---|---|
+| Audio Peer↔Peer | DTLS-**SRTP** (WebRTC-Pflicht) | ✅ automatisch |
+| Chat Peer↔Peer | DTLS-**SCTP** DataChannel (WebRTC-Pflicht) | ✅ automatisch |
+| Signaling → Init | **wss:// (TLS)** — **Pflicht** | ⛓️ siehe unten |
+| TURN-Relay | **turns:// (TLS)** statt `turn:` | ⛓️ coturn-Config |
+
+**Signaling-TLS:** Init **muss** `wss://` sprechen. **Self-signed Cert / PEM reicht** — der
+Client **pinnt/vertraut** dem mitgelieferten Cert (PEM-Fingerprint), keine CA nötig. **`ws://`
+nur für Loopback** (`127.0.0.1`/`localhost` — verlässt den Rechner physisch nie). Für jeden
+Nicht-Loopback-Host erzwingt der Client `wss://` (Verbindung sonst verweigert). Cert-Erzeugung:
+self-signed via `rcgen`/openssl, als PEM ausgeliefert; Rotation später.
 
 - **DTLS-SRTP** ist Pflicht in WebRTC → Audio Ende-zu-Ende peerweise verschlüsselt.
 - **TURN kann Audio nicht entschlüsseln** — sieht nur SRTP-Bytes. Media bleibt privat, auch über Relay.
@@ -335,8 +370,9 @@ dann TURN, dann Mesh, **UI/Branding zuletzt**. Jede Phase ist für sich testbar.
 |---|---|---|
 | 0 ✓ | **DONE.** Spike 0 encode-once (webrtc-rs: WORKS). Mini-Spike cpal+opus+resample Roundtrip auf realer Hardware (FiiO @192k) — bestätigt gut hörbar 2026-06-05. | ✅ erfüllt |
 | 1 | **1:1 echtes Audio:** 2 Clients, 1 Room, PTT. cpal capture → opus → webrtc-rs direct → decode → cpal playback. InitConnection minimal (Join/Roster/SDP/ICE-Relay) **+ Room-Auth-Token** + Glare. | 2 Leute hören sich |
-| 2 | **TURN-Fallback:** coturn + ephemere Creds; hard-NAT-Paar verbinden; Verbindungs-Badge DIREKT/RELAY. | Relay-Link nachweisbar |
-| 3 | **4er-Mesh:** N-Peer Join/Leave, Renegotiation, Mixer-Port (relay-bots-Logik) + Jitter-Buffer. | 4 Leute, sauberer Mix |
+| 1b | **Chat (DataChannel)** + **Signaling-TLS** (wss, self-signed/PEM-Pin; ws nur Loopback). | Chat verschlüsselt, wss erzwungen |
+| 2 | **TURN-Fallback:** coturn (turns://) + ephemere Creds; hard-NAT-Paar verbinden; Verbindungs-Badge DIREKT/RELAY. | Relay-Link nachweisbar |
+| 3 | **4er-Mesh:** N-Peer Join/Leave, Renegotiation, Mixer-Port (relay-bots-Logik) + Jitter-Buffer, vollständiges Roster. | 4 Leute, sauberer Mix, alle sichtbar |
 | 4 | **AEC/APM** (`webrtc-audio-processing`) im Capture-Pfad; ohne-Headset-Test. | kein Echo über Speaker |
 | 5 | **UI/Branding** (kit.css): Roster, PTT-Anzeige, Badges, Settings. | bedienbar |
 | 6 | Härtung: Reconnect (Init-Restart-Überleben), Device-Hotswap, Cap-Verhalten, Last-Test Richtung 12-16. | release-fähig |

@@ -16,6 +16,14 @@ pub struct PeerInfo {
     pub name: String,
 }
 
+/// Text-chat payload sent over the per-peer WebRTC DataChannel (NOT through
+/// the signaling server). Sender identity = the peer owning the channel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMsg {
+    pub text: String,
+    pub ts: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnCreds {
     pub urls: Vec<String>,
@@ -25,7 +33,7 @@ pub struct TurnCreds {
 }
 
 /// Client → Server.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "kebab-case")]
 pub enum ClientMsg {
     /// First message on a connection. `token` is the room-auth token
@@ -46,7 +54,7 @@ pub enum ClientMsg {
 }
 
 /// Server → Client.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "kebab-case")]
 pub enum ServerMsg {
     /// Existing peers in the room (sent to the joiner; self excluded).

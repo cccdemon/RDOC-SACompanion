@@ -1,0 +1,10 @@
+[package]
+name = "protocol"
+version = "0.1.0"
+edition.workspace = true
+
+# Shared signaling message types — used by the InitConnection server and
+# (later) the Companion client, so the wire format has one source of truth.
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

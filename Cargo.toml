@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["crates/protocol", "server/init"]
+# Spikes are standalone throwaway crates — keep them out of the workspace.
+exclude = ["spikes/track-fanout", "spikes/audio-roundtrip"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"

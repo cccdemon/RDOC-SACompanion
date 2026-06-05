@@ -12,6 +12,7 @@
 //! Subcommand: `init-connection mint <room>` prints that room's join token.
 
 mod auth;
+mod tls;
 mod turn;
 
 use std::collections::HashMap;
@@ -82,9 +83,32 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
 
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
-    tracing::info!("InitConnection listening on :{port} (warn@{WARN_CAP} hard@{HARD_CAP})");
-    axum::serve(listener, app).await?;
+
+    // TLS by default (wss). TLS_DISABLE=1 → plain ws, loopback dev only.
+    if std::env::var("TLS_DISABLE").is_ok() {
+        tracing::warn!("TLS_DISABLE set — serving PLAIN ws (loopback dev only)");
+        let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
+        tracing::info!("InitConnection listening (ws) on :{port} (warn@{WARN_CAP} hard@{HARD_CAP})");
+        axum::serve(listener, app).await?;
+        return Ok(());
+    }
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let cert_path = std::env::var("TLS_CERT").unwrap_or_else(|_| "init-cert.pem".into());
+    let key_path = std::env::var("TLS_KEY").unwrap_or_else(|_| "init-key.pem".into());
+    let cert = tls::ensure(&cert_path, &key_path)?;
+    tracing::info!("InitConnection listening (wss) on :{port} (warn@{WARN_CAP} hard@{HARD_CAP})");
+    tracing::info!("TLS cert SHA-256 (pin this on the client): {}", cert.fingerprint);
+    println!("CERT_SHA256={}", cert.fingerprint);
+    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_pem(
+        cert.cert_pem.into_bytes(),
+        cert.key_pem.into_bytes(),
+    )
+    .await?;
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+    axum_server::bind_rustls(addr, rustls_config)
+        .serve(app.into_make_service())
+        .await?;
     Ok(())
 }
 

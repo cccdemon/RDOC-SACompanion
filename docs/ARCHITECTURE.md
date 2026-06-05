@@ -267,8 +267,8 @@ verschlüsselt:
 |---|---|---|
 | Audio Peer↔Peer | DTLS-**SRTP** (WebRTC-Pflicht) | ✅ automatisch |
 | Chat Peer↔Peer | DTLS-**SCTP** DataChannel (WebRTC-Pflicht) | ✅ automatisch |
-| Signaling → Init | **wss:// (TLS)** — **Pflicht** | ⛓️ siehe unten |
-| TURN-Relay | **turns:// (TLS)** statt `turn:` | ⛓️ coturn-Config |
+| Signaling → Init | **wss:// (TLS)** — **Pflicht** | ✅ implementiert (Phase 1b) |
+| TURN-Relay | **turns:// (TLS)** statt `turn:` | ⛓️ coturn-Config (Phase 2) |
 
 **Signaling-TLS:** Init **muss** `wss://` sprechen. **Self-signed Cert / PEM reicht** — der
 Client **pinnt/vertraut** dem mitgelieferten Cert (PEM-Fingerprint), keine CA nötig. **`ws://`
@@ -370,7 +370,7 @@ dann TURN, dann Mesh, **UI/Branding zuletzt**. Jede Phase ist für sich testbar.
 |---|---|---|
 | 0 ✓ | **DONE.** Spike 0 encode-once (webrtc-rs: WORKS). Mini-Spike cpal+opus+resample Roundtrip auf realer Hardware (FiiO @192k) — bestätigt gut hörbar 2026-06-05. | ✅ erfüllt |
 | 1 ✓ | **DONE (2026-06-05).** 1:1 echtes Audio: cpal→opus→webrtc-rs→decode→cpal, InitConnection (Join/Roster/SDP/ICE-Relay + Room-Auth + Glare). Verifiziert: 2 Instanzen hören sich, PeerConnection Connected. | ✅ 2 Leute hören sich |
-| 1b | **Chat (DataChannel) DONE** (verschlüsselt, verifiziert). **Offen: Signaling-TLS** (wss, self-signed/PEM-Pin; ws nur Loopback). | Chat ✅ · wss offen |
+| 1b ✓ | **DONE.** Chat (DataChannel, verschlüsselt) + **Signaling-TLS**: Init serviert `wss://` (rcgen self-signed, persistiert, druckt SHA-256), Client pinnt via `CERT_SHA256`; falscher Pin → abgelehnt (verifiziert). `ws://` nur Loopback. `TLS_DISABLE=1` für ws-Loopback-Dev. | ✅ voll verschlüsselt |
 | 2 | **TURN-Fallback:** coturn (turns://) + ephemere Creds; hard-NAT-Paar verbinden; Verbindungs-Badge DIREKT/RELAY. | Relay-Link nachweisbar |
 | 3 | **4er-Mesh:** N-Peer Join/Leave, Renegotiation, Mixer-Port (relay-bots-Logik) + Jitter-Buffer, vollständiges Roster. | 4 Leute, sauberer Mix, alle sichtbar |
 | 4 | **AEC/APM** (`webrtc-audio-processing`) im Capture-Pfad; ohne-Headset-Test. | kein Echo über Speaker |

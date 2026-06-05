@@ -16,6 +16,11 @@ apps/companion/src-tauri/target
 .env.*
 !.env.example
 
+# Self-signed certs / keys (never commit)
+*.pem
+*.key
+*.log
+
 # OS
 Thumbs.db
 .DS_Store

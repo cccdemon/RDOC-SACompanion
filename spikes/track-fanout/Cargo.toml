@@ -1,0 +1,14 @@
+[package]
+name = "track-fanout-spike"
+version = "0.1.0"
+edition = "2021"
+
+# Spike 0: does a single TrackLocalStaticRTP, added to N PeerConnections,
+# fan out one write_rtp() to all N remotes? (= encode-once, encrypt-per-peer)
+# In-process loopback, no signaling server, no STUN (host candidates).
+
+[dependencies]
+webrtc = "0.11"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+bytes = "1"

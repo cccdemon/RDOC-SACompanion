@@ -1,0 +1,13 @@
+[package]
+name = "audio-roundtrip-spike"
+version = "0.1.0"
+edition = "2021"
+
+# Phase-0 Mini-Spike: cpal capture -> opus encode -> opus decode -> cpal playback.
+# Beweist den nativen Audio-Stack (ohne Netz). Du hörst dich selbst.
+# audiopus vendored libopus (baut via cmake + MSVC, kein System-libopus nötig).
+
+[dependencies]
+cpal = "0.15"
+audiopus = "0.2"
+anyhow = "1"

@@ -1,0 +1,21 @@
+# Rust
+/target
+**/target
+Cargo.lock.orig
+
+# Node / Tauri frontend
+node_modules
+dist
+.vite
+
+# Tauri build output
+apps/companion/src-tauri/target
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+Thumbs.db
+.DS_Store

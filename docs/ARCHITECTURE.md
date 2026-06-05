@@ -369,8 +369,8 @@ dann TURN, dann Mesh, **UI/Branding zuletzt**. Jede Phase ist für sich testbar.
 | Phase | Inhalt | Gate |
 |---|---|---|
 | 0 ✓ | **DONE.** Spike 0 encode-once (webrtc-rs: WORKS). Mini-Spike cpal+opus+resample Roundtrip auf realer Hardware (FiiO @192k) — bestätigt gut hörbar 2026-06-05. | ✅ erfüllt |
-| 1 | **1:1 echtes Audio:** 2 Clients, 1 Room, PTT. cpal capture → opus → webrtc-rs direct → decode → cpal playback. InitConnection minimal (Join/Roster/SDP/ICE-Relay) **+ Room-Auth-Token** + Glare. | 2 Leute hören sich |
-| 1b | **Chat (DataChannel)** + **Signaling-TLS** (wss, self-signed/PEM-Pin; ws nur Loopback). | Chat verschlüsselt, wss erzwungen |
+| 1 ✓ | **DONE (2026-06-05).** 1:1 echtes Audio: cpal→opus→webrtc-rs→decode→cpal, InitConnection (Join/Roster/SDP/ICE-Relay + Room-Auth + Glare). Verifiziert: 2 Instanzen hören sich, PeerConnection Connected. | ✅ 2 Leute hören sich |
+| 1b | **Chat (DataChannel) DONE** (verschlüsselt, verifiziert). **Offen: Signaling-TLS** (wss, self-signed/PEM-Pin; ws nur Loopback). | Chat ✅ · wss offen |
 | 2 | **TURN-Fallback:** coturn (turns://) + ephemere Creds; hard-NAT-Paar verbinden; Verbindungs-Badge DIREKT/RELAY. | Relay-Link nachweisbar |
 | 3 | **4er-Mesh:** N-Peer Join/Leave, Renegotiation, Mixer-Port (relay-bots-Logik) + Jitter-Buffer, vollständiges Roster. | 4 Leute, sauberer Mix, alle sichtbar |
 | 4 | **AEC/APM** (`webrtc-audio-processing`) im Capture-Pfad; ohne-Headset-Test. | kein Echo über Speaker |

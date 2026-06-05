@@ -4,6 +4,7 @@
 
 pub mod audio;
 pub mod mesh;
+pub mod serverless;
 pub mod signaling;
 
 use std::collections::{HashMap, VecDeque};
@@ -88,12 +89,48 @@ impl Engine {
     }
 }
 
-fn build_api() -> Result<API> {
+pub(crate) fn build_api() -> Result<API> {
     let mut m = MediaEngine::default();
     m.register_default_codecs()?;
     let mut registry = Registry::new();
     registry = register_default_interceptors(registry, &mut m)?;
     Ok(APIBuilder::new().with_media_engine(m).with_interceptor_registry(registry).build())
+}
+
+/// Spin up the audio rig (device + encode/decode/mix threads) shared by both
+/// the server-signaled mesh and the serverless 1:1 mode. Returns the transmit
+/// flag, the encoded-Opus receiver (feed to the local track writer), and the
+/// decode sender (feed remote RTP payloads in).
+pub(crate) fn setup_audio() -> Result<(
+    Arc<AtomicBool>,
+    mpsc::UnboundedReceiver<Bytes>,
+    mpsc::UnboundedSender<(String, Bytes)>,
+)> {
+    let cap: Buf = Arc::new(Mutex::new(VecDeque::new()));
+    let play: Buf = Arc::new(Mutex::new(VecDeque::new()));
+    let mix: MixMap = Arc::new(Mutex::new(HashMap::new()));
+    let transmit = Arc::new(AtomicBool::new(false));
+
+    let (rate_tx, rate_rx) = std::sync::mpsc::channel::<(u32, u32)>();
+    {
+        let (cap, play) = (cap.clone(), play.clone());
+        std::thread::spawn(move || audio::run_devices(cap, play, rate_tx));
+    }
+    let (in_rate, out_rate) = rate_rx.recv()?;
+
+    let (opus_tx, opus_rx) = mpsc::unbounded_channel::<Bytes>();
+    let (decode_tx, decode_rx) = mpsc::unbounded_channel::<(String, Bytes)>();
+    {
+        let (cap, transmit) = (cap.clone(), transmit.clone());
+        std::thread::spawn(move || audio::encode_loop(cap, in_rate, transmit, opus_tx));
+    }
+    {
+        let mix = mix.clone();
+        std::thread::spawn(move || audio::decode_loop(decode_rx, mix));
+    }
+    std::thread::spawn(move || audio::mixer_loop(mix, play, out_rate));
+
+    Ok((transmit, opus_rx, decode_tx))
 }
 
 struct Member {
@@ -136,32 +173,7 @@ fn emit_roster(
 pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let cap: Buf = Arc::new(Mutex::new(VecDeque::new()));
-    let play: Buf = Arc::new(Mutex::new(VecDeque::new()));
-    let mix: MixMap = Arc::new(Mutex::new(HashMap::new()));
-    let transmit = Arc::new(AtomicBool::new(false));
-
-    let (rate_tx, rate_rx) = std::sync::mpsc::channel::<(u32, u32)>();
-    {
-        let (cap, play) = (cap.clone(), play.clone());
-        std::thread::spawn(move || audio::run_devices(cap, play, rate_tx));
-    }
-    let (in_rate, out_rate) = rate_rx.recv()?;
-
-    let (opus_tx, mut opus_rx) = mpsc::unbounded_channel::<Bytes>();
-    let (decode_tx, decode_rx) = mpsc::unbounded_channel::<(String, Bytes)>();
-    {
-        let (cap, transmit, opus_tx) = (cap.clone(), transmit.clone(), opus_tx.clone());
-        std::thread::spawn(move || audio::encode_loop(cap, in_rate, transmit, opus_tx));
-    }
-    {
-        let mix = mix.clone();
-        std::thread::spawn(move || audio::decode_loop(decode_rx, mix));
-    }
-    {
-        let (mix, play) = (mix.clone(), play.clone());
-        std::thread::spawn(move || audio::mixer_loop(mix, play, out_rate));
-    }
+    let (transmit, mut opus_rx, decode_tx) = setup_audio()?;
 
     let api = Arc::new(build_api()?);
     let local = Arc::new(TrackLocalStaticSample::new(

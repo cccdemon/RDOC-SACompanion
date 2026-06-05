@@ -342,6 +342,17 @@ kein Media-Server), zahlen dafür mit der ~16er-Decke. Bewusster Trade-off.
 
 ---
 
+## 14b. Serverless-Modus (1:1, Copy-Paste-Signaling)
+
+Optionaler Modus **ganz ohne InitConnection**: zwei Peers tauschen das SDP
+Offer/Answer als **base64-Code** manuell aus (Discord/Chat). Non-trickle ICE
+(volle Candidate-Gathering vor Export). Nutzt public STUN; **kein TURN** (kein
+Cred-Server) → hartes/symmetrisches NAT kann nicht relayen. Nur **2 Peers**
+(N-Mesh per Copy-Paste unpraktikabel). Verschlüsselung unverändert (DTLS-SRTP +
+SCTP). Code: `companion-core/src/serverless.rs`; UI-Tab „Serverless" (Rolle A
+erzeugt Offer, B erzeugt Answer). Erfüllt den „am liebsten vollkommen
+serverless"-Wunsch für direkte 1:1-Calls.
+
 ## 15. Offene Punkte / Spikes (vor Implementierung)
 
 1. ~~**webrtc-rs Encode-once**~~ — **GELÖST (Spike 0, 2026-06-05): WORKS.** Ein

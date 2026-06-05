@@ -39,6 +39,15 @@ export default function App() {
   const [msg, setMsg] = useState("");
   const chatEnd = useRef<HTMLDivElement>(null);
 
+  // Serverless 1:1 (copy-paste SDP) state.
+  const [mode, setMode] = useState<"server" | "serverless">("server");
+  const [srole, setSrole] = useState<"a" | "b" | null>(null);
+  const [offerOut, setOfferOut] = useState("");
+  const [answerIn, setAnswerIn] = useState("");
+  const [offerIn, setOfferIn] = useState("");
+  const [answerOut, setAnswerOut] = useState("");
+  const [busy, setBusy] = useState(false);
+
   useEffect(() => {
     const un = listen<UiEvent>("ui", (e) => {
       const p = e.payload;
@@ -95,6 +104,40 @@ export default function App() {
     }
   };
 
+  const copy = (t: string) => navigator.clipboard?.writeText(t);
+  const slOffer = async () => {
+    setBusy(true);
+    setLog("");
+    try {
+      const c = await invoke<string>("serverless_offer", { name: form.name.trim() || "Commander" });
+      setOfferOut(c);
+    } catch (e) {
+      setLog(String(e));
+    }
+    setBusy(false);
+  };
+  const slAcceptAnswer = async () => {
+    try {
+      await invoke("serverless_accept_answer", { code: answerIn.trim() });
+    } catch (e) {
+      setLog(String(e));
+    }
+  };
+  const slAcceptOffer = async () => {
+    setBusy(true);
+    setLog("");
+    try {
+      const a = await invoke<string>("serverless_accept_offer", {
+        name: form.name.trim() || "Commander",
+        code: offerIn.trim(),
+      });
+      setAnswerOut(a);
+    } catch (e) {
+      setLog(String(e));
+    }
+    setBusy(false);
+  };
+
   const ptt = () => invoke("toggle_transmit");
   const send = () => {
     const t = msg.trim();
@@ -109,20 +152,75 @@ export default function App() {
       <div className="screen center">
         <div className="card connect">
           <div className="brand">RDOC <span>// SACOMPANION</span></div>
-          <div className="sub">Serverless P2P Voice-Mesh</div>
-          <label>Server</label>
-          <input value={form.server} onChange={(e) => setForm({ ...form, server: e.target.value })} spellCheck={false} />
-          <label>Room</label>
-          <input value={form.room} onChange={(e) => setForm({ ...form, room: e.target.value })} spellCheck={false} />
+          <div className="sub">P2P Voice + Chat</div>
+
+          <div className="tabs">
+            <button className={mode === "server" ? "tab on" : "tab"} onClick={() => setMode("server")}>SERVER</button>
+            <button className={mode === "serverless" ? "tab on" : "tab"} onClick={() => setMode("serverless")}>SERVERLESS</button>
+          </div>
+
           <label>Name</label>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Commander" />
-          <label>Room-Token <span className="opt">(optional)</span></label>
-          <input value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} spellCheck={false} />
-          <label>CERT_SHA256 <span className="opt">(nur für wss://)</span></label>
-          <input value={form.certSha256} onChange={(e) => setForm({ ...form, certSha256: e.target.value })} spellCheck={false} className="mono" />
-          <button className="btn primary" onClick={onConnect} disabled={connecting}>
-            {connecting ? "VERBINDE…" : "VERBINDEN"}
-          </button>
+
+          {mode === "server" ? (
+            <>
+              <label>Server</label>
+              <input value={form.server} onChange={(e) => setForm({ ...form, server: e.target.value })} spellCheck={false} className="mono" />
+              <label>Room</label>
+              <input value={form.room} onChange={(e) => setForm({ ...form, room: e.target.value })} spellCheck={false} />
+              <label>Room-Token <span className="opt">(optional)</span></label>
+              <input value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} spellCheck={false} />
+              <label>CERT_SHA256 <span className="opt">(nur für wss://)</span></label>
+              <input value={form.certSha256} onChange={(e) => setForm({ ...form, certSha256: e.target.value })} spellCheck={false} className="mono" />
+              <button className="btn primary" onClick={onConnect} disabled={connecting}>
+                {connecting ? "VERBINDE…" : "VERBINDEN"}
+              </button>
+            </>
+          ) : (
+            <div className="serverless">
+              <div className="sub2">Kein Server — SDP-Codes per Discord/Chat austauschen. STUN für NAT; hartes NAT ohne TURN = evtl. kein Connect.</div>
+              {!srole && (
+                <div className="srole">
+                  <button className="btn" onClick={() => setSrole("a")}>ANRUF STARTEN (A)</button>
+                  <button className="btn" onClick={() => setSrole("b")}>ANRUF ANNEHMEN (B)</button>
+                </div>
+              )}
+              {srole === "a" && (
+                <>
+                  {!offerOut ? (
+                    <button className="btn primary" onClick={slOffer} disabled={busy}>{busy ? "ERZEUGE…" : "1) OFFER ERZEUGEN"}</button>
+                  ) : (
+                    <>
+                      <label>Dein Offer-Code → an Peer schicken</label>
+                      <textarea readOnly value={offerOut} className="mono code" />
+                      <button className="btn sm" onClick={() => copy(offerOut)}>KOPIEREN</button>
+                      <label>2) Answer-Code vom Peer einfügen</label>
+                      <textarea value={answerIn} onChange={(e) => setAnswerIn(e.target.value)} className="mono code" placeholder="Answer-Code…" />
+                      <button className="btn primary" onClick={slAcceptAnswer} disabled={!answerIn.trim()}>VERBINDEN</button>
+                    </>
+                  )}
+                  <button className="btn ghost sm" onClick={() => { setSrole(null); setOfferOut(""); setAnswerIn(""); }}>zurück</button>
+                </>
+              )}
+              {srole === "b" && (
+                <>
+                  <label>1) Offer-Code vom Peer einfügen</label>
+                  <textarea value={offerIn} onChange={(e) => setOfferIn(e.target.value)} className="mono code" placeholder="Offer-Code…" />
+                  {!answerOut ? (
+                    <button className="btn primary" onClick={slAcceptOffer} disabled={busy || !offerIn.trim()}>{busy ? "…" : "ANNEHMEN"}</button>
+                  ) : (
+                    <>
+                      <label>2) Dein Answer-Code → zurück an Peer</label>
+                      <textarea readOnly value={answerOut} className="mono code" />
+                      <button className="btn sm" onClick={() => copy(answerOut)}>KOPIEREN</button>
+                      <div className="sub2">Sobald der Peer den Code einfügt, verbindet ihr euch.</div>
+                    </>
+                  )}
+                  <button className="btn ghost sm" onClick={() => { setSrole(null); setOfferIn(""); setAnswerOut(""); }}>zurück</button>
+                </>
+              )}
+            </div>
+          )}
           {log && <div className="err">{log}</div>}
         </div>
       </div>

@@ -63,6 +63,19 @@ input.mono { font-family: var(--mono); font-size: 11px; }
 .btn:hover { border-color: var(--cyan-dim); }
 .btn.primary { background: var(--cyan-dim); border-color: var(--cyan); color: #04141a; margin-top: 18px; }
 .btn.primary:disabled { opacity: 0.5; cursor: default; }
+.btn.sm { padding: 6px 10px; font-size: 11px; margin-top: 4px; letter-spacing: 0.5px; }
+.btn.ghost { background: transparent; }
+.tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.tab { flex: 1; background: var(--panel2); border: 1px solid var(--line); color: var(--dim); border-radius: 6px; padding: 8px; cursor: pointer; font-weight: 600; letter-spacing: 1px; font-size: 12px; }
+.tab.on { color: var(--cyan); border-color: var(--cyan-dim); background: #102028; }
+.sub2 { color: var(--dim); font-size: 11px; margin: 8px 0; line-height: 1.45; }
+.srole { display: flex; gap: 8px; margin-top: 8px; }
+.srole .btn { flex: 1; }
+.serverless { display: flex; flex-direction: column; }
+.serverless label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin: 12px 0 4px; }
+textarea.code { background: var(--panel2); border: 1px solid var(--line); color: var(--txt); border-radius: 6px; padding: 8px; font-family: var(--mono); font-size: 10px; height: 68px; resize: vertical; outline: none; width: 100%; box-sizing: border-box; }
+textarea.code:focus { border-color: var(--cyan-dim); }
+
 .err, .footlog { color: var(--red); font-size: 12px; margin-top: 12px; font-family: var(--mono); }
 .footlog { padding: 6px 14px; border-top: 1px solid var(--line); }
 

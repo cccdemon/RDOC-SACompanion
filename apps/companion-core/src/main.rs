@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     });
 
     let engine = Arc::new(start(cfg, sink).await?);
-    println!("== RDOC VoiceMesh (headless) ==  '/t'=Senden toggle · sonst Chat · Strg+C beendet");
+    println!("== RDOC SquadLink Lite (headless) ==  '/t'=Senden toggle · sonst Chat · Strg+C beendet");
 
     let e2 = engine.clone();
     std::thread::spawn(move || {

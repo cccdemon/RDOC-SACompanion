@@ -151,7 +151,7 @@ export default function App() {
     return (
       <div className="screen center">
         <div className="card connect">
-          <div className="brand">RDOC <span>// VOICEMESH</span></div>
+          <div className="brand">RDOC <span>// SQUADLINK LITE</span></div>
           <div className="sub">P2P Voice + Chat</div>
 
           <div className="tabs">
@@ -230,7 +230,7 @@ export default function App() {
   return (
     <div className="screen app">
       <header>
-        <div className="brand sm">RDOC <span>// VOICEMESH</span></div>
+        <div className="brand sm">RDOC <span>// SQUADLINK LITE</span></div>
         <div className={`dot ${transmitting ? "tx" : "ok"}`} />
         <div className="hstatus">{transmitting ? "SENDEN" : "VERBUNDEN"}</div>
       </header>

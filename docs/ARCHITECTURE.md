@@ -1,4 +1,4 @@
-# RDOC VoiceMesh — Architektur
+# RDOC SquadLink Lite — Architektur
 
 > **Stand-Alone Companion.** Serverloses P2P-Voice-Mesh zwischen mehreren Companion-Apps,
 > ohne SFU (kein LiveKit). Eigenständige App, **außerhalb der RDOC-Suite**, aber gleiches
@@ -21,10 +21,10 @@ winzigen **InitConnection-Server** (Signaling) und **coturn** als NAT-Fallback.
 
 **Non-Goals:**
 - Kein SFU, keine Server-Mischung von Audio.
-- Keine Discord-Integration (das macht die RDOC-Suite Companion). VoiceMesh ist eigenständig.
-- **Keine Kopplung an den Fleetmanager.** VoiceMesh läuft komplett standalone. Es gibt *optional*
+- Keine Discord-Integration (das macht die RDOC-Suite Companion). SquadLink Lite ist eigenständig.
+- **Keine Kopplung an den Fleetmanager.** SquadLink Lite läuft komplett standalone. Es gibt *optional*
   eine entkoppelte **Fleetmanager-Session-Vermittlung** (nur Room+Invite, kein coturn, kein Media)
-  — siehe §18. Default bleibt: VoiceMesh kennt den Fleetmanager nicht.
+  — siehe §18. Default bleibt: SquadLink Lite kennt den Fleetmanager nicht.
 - Keine großen Fleet-Ops (30-50 Leute) — dafür ist Mesh ungeeignet (siehe §10).
 
 **Design-Cap Raumgröße (MVP):** Warn-Banner ab **12**, Hard-Cap **16** (Join-Ablehnung).
@@ -60,7 +60,7 @@ winzigen **InitConnection-Server** (Signaling) und **coturn** als NAT-Fallback.
 
 ## 3. Komponenten
 
-### 3.1 RDOC VoiceMesh (Desktop-App)
+### 3.1 RDOC SquadLink Lite (Desktop-App)
 Tauri v2. **UI im Webview** (React + kit.css, RDOC-Design wiederverwenden), **Audio + Netz
 komplett in Rust** — KEIN WebView2-Audio (löst nebenbei OBS-Capture, Device-Wahl, Mic-Gain,
 die beim Webview-Companion fragil waren).
@@ -335,7 +335,7 @@ self-signed via `rcgen`/openssl, als PEM ausgeliefert; Rotation später.
 ## 12. Modul-Layout (Vorschlag)
 
 ```
-RDOC VoiceMesh/
+RDOC SquadLink Lite/
 ├─ apps/
 │  └─ companion/                 # Tauri-App
 │     ├─ src/                    # React UI (kit.css aus RDOC-Suite übernehmen)
@@ -378,7 +378,7 @@ Optional: `protocol`-Crate als Workspace-Member, von Companion **und** Init gete
 
 ## 14. Warum kein LiveKit (Begründung der Existenz)
 
-LiveKit = SFU = Upload-1× + Server-Skalierung für große Räume. VoiceMesh tauscht **Skalierung
+LiveKit = SFU = Upload-1× + Server-Skalierung für große Räume. SquadLink Lite tauscht **Skalierung
 gegen Serverlosigkeit**: kleine Squads bekommen direktes P2P (niedrigere Latenz, beste Privacy,
 kein Media-Server), zahlen dafür mit der ~16er-Decke. Bewusster Trade-off.
 
@@ -437,9 +437,9 @@ Mesh-Last-Test in Phase 6 hochziehen (276 Links bei N=24 → Join/ICE-Storm muss
 
 ## 18. Optionale Erweiterung: Fleetmanager-Integration (nur Session-Vermittlung)
 
-> **Optional + entkoppelt.** Der Fleetmanager hat mit VoiceMesh **erstmal nichts zu tun** —
-> VoiceMesh bleibt standalone der Default. Diese Erweiterung ist **reine Session-Vermittlung**:
-> der Fleetmanager sagt nur „diese Operation gehört zu *diesem* VoiceMesh-Room, hier ist dein
+> **Optional + entkoppelt.** Der Fleetmanager hat mit SquadLink Lite **erstmal nichts zu tun** —
+> SquadLink Lite bleibt standalone der Default. Diese Erweiterung ist **reine Session-Vermittlung**:
+> der Fleetmanager sagt nur „diese Operation gehört zu *diesem* SquadLink Lite-Room, hier ist dein
 > Join-Link". **Kein coturn, kein Media, kein SFU.** Audio bleibt P2P, Signaling bleibt Init.
 
 **Macht / macht NICHT:**
@@ -449,23 +449,23 @@ Mesh-Last-Test in Phase 6 hochziehen (276 Links bei N=24 → Join/ICE-Storm muss
 | Pro Operation einen Room-Namen (`op-<id>`) + signierten Invite-Token erzeugen | Audio anfassen/relayen |
 | Join-Deep-Link verteilen (Op-Seite / Discord-DM), analog zum bestehenden Mission-Deep-Link der RDOC-Suite | coturn/TURN bereitstellen oder voraussetzen |
 | Optional das Roster vorab befüllen (erwartete Teilnehmer) | Den Init-Server ersetzen — Signaling bleibt Init |
-| | VoiceMesh zur Pflicht machen — das RDOC-Suite-Voice (LiveKit/Relay-Bots) bleibt davon unberührt |
+| | SquadLink Lite zur Pflicht machen — das RDOC-Suite-Voice (LiveKit/Relay-Bots) bleibt davon unberührt |
 
 **Flow:**
 1. Fleetmanager (optional, env-gated) erzeugt für die Op `room = "op-<id>"` + einen Invite-Token
    (HMAC, gleiche Form wie Init Room-Auth §15.4 / TURN-Creds §8).
-2. Zeigt einen Join-Deep-Link: `rdoc-voicemesh://join?init=wss://init.…&room=op-<id>&token=…`
+2. Zeigt einen Join-Deep-Link: `rdoc-squadlink-lite://join?init=wss://init.…&room=op-<id>&token=…`
    (analog zum Companion-Mission-Link der RDOC-Suite).
-3. Crew klickt → VoiceMesh-App öffnet, joined direkt den Room über Init → normales P2P-Mesh.
+3. Crew klickt → SquadLink Lite-App öffnet, joined direkt den Room über Init → normales P2P-Mesh.
 
 **Kopplung bewusst minimal:**
 - **Ein geteiltes Secret** zwischen Fleetmanager und Init (Room-Auth-Signatur) — sonst nichts.
   Fleetmanager mintet den Token zustandslos selbst, *oder* ruft eine winzige Init-API `POST /rooms`.
   **Keine DB-Kopplung, kein gemeinsamer State.**
-- Die VoiceMesh-App braucht nur einen Deep-Link-Handler (`rdoc-voicemesh://`) — **null
+- Die SquadLink Lite-App braucht nur einen Deep-Link-Handler (`rdoc-squadlink-lite://`) — **null
   Fleetmanager-Wissen** im Client.
-- Fällt der Fleetmanager weg → VoiceMesh unverändert (manueller Room/Invite wie immer).
+- Fällt der Fleetmanager weg → SquadLink Lite unverändert (manueller Room/Invite wie immer).
 
 **Abgrenzung:** Die RDOC-Suite hat ihr eigenes Voice (LiveKit-SFU + Relay-Bots, Discord-gebunden).
-VoiceMesh ist die **alternative, serverlose** Voice-Option für kleine Squads. Die Integration ist
+SquadLink Lite ist die **alternative, serverlose** Voice-Option für kleine Squads. Die Integration ist
 **nur Session-Vermittlung** — kein Ersatz, keine Vermischung der zwei Voice-Stacks, kein coturn.

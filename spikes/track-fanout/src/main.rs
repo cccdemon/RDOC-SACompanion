@@ -1,7 +1,7 @@
 //! Spike 0 — encode-once fan-out.
 //!
 //! Question: can ONE `TrackLocalStaticRTP` be added to N PeerConnections so a
-//! single `write_rtp()` reaches all N remotes? If yes, the VoiceMesh mesh
+//! single `write_rtp()` reaches all N remotes? If yes, the SquadLink Lite mesh
 //! encodes Opus once and the lib handles per-peer SRTP — the core efficiency
 //! assumption in docs/ARCHITECTURE.md §4.
 //!

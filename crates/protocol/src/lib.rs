@@ -1,4 +1,4 @@
-//! Signaling wire format for RDOC VoiceMesh.
+//! Signaling wire format for RDOC SquadLink Lite.
 //!
 //! JSON over WebSocket. Tag field is `t`; variants are kebab-case
 //! (`peer-joined`, `room-full`). This crate is the single source of truth —

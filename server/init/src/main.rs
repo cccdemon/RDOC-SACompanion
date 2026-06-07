@@ -1,4 +1,4 @@
-//! InitConnection — WebSocket signaling for the RDOC VoiceMesh mesh.
+//! InitConnection — WebSocket signaling for the RDOC SquadLink Lite mesh.
 //!
 //! Dumb relay: routes offer/answer/ice by `to`, keeps the per-room roster,
 //! enforces room-auth + cap, mints ephemeral TURN creds. No media here.

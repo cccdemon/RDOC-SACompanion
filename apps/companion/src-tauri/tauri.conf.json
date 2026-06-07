@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "RDOC VoiceMesh",
+  "productName": "RDOC SquadLink Lite",
   "version": "0.1.0",
-  "identifier": "org.raumdock.voicemesh",
+  "identifier": "org.raumdock.squadlink-lite",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "RDOC VoiceMesh",
+        "title": "RDOC SquadLink Lite",
         "width": 920,
         "height": 700,
         "minWidth": 720,

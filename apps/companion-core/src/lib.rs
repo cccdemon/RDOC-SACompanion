@@ -184,7 +184,7 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
             ..Default::default()
         },
         "audio".to_owned(),
-        "rdoc-voicemesh".to_owned(),
+        "rdoc-squadlink-lite".to_owned(),
     ));
     {
         let local = local.clone();

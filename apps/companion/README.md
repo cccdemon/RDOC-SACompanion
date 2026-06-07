@@ -1,4 +1,4 @@
-# RDOC VoiceMesh (Tauri UI)
+# RDOC SquadLink Lite (Tauri UI)
 
 Desktop-UI über die `companion-core`-Engine. Roster mit Verbindungs-Badges
 (DIREKT/RELAY) + Sprech-Anzeige, Push-to-Talk, Chat.

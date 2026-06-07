@@ -1,4 +1,4 @@
-# RDOC VoiceMesh
+# RDOC SquadLink Lite
 
 Stand-Alone Companion — serverloses **P2P-Voice-Mesh** zwischen mehreren Companion-Apps,
 ohne SFU (kein LiveKit). Native Audio/Netz in Rust (Tauri-App), gleiches Design wie die
@@ -21,9 +21,9 @@ gebaut. Offen: Hör-Tuning bei N, coturn-RELAY live, Phase-6-Härtung.
 GitHub Actions baut die GUI auf einem sauberen Windows-Runner:
 
 - **Workflow:** [`.github/workflows/build-companion.yml`](.github/workflows/build-companion.yml)
-- **Manuell:** Actions → „Build VoiceMesh (Windows)" → *Run workflow* → danach den
-  Artefakt **`rdoc-voicemesh-windows`** (NSIS-`.exe` + `.msi`) herunterladen.
-- **Release:** Tag `voicemesh-v*` pushen → Workflow legt einen Draft-Release mit den Installern an.
+- **Manuell:** Actions → „Build SquadLink Lite (Windows)" → *Run workflow* → danach den
+  Artefakt **`rdoc-squadlink-lite-windows`** (NSIS-`.exe` + `.msi`) herunterladen.
+- **Release:** Tag `squadlink-lite-v*` pushen → Workflow legt einen Draft-Release mit den Installern an.
 
 Der Prototyp ist **unsigniert** → SmartScreen warnt beim ersten Start („Weitere Informationen →
 Trotzdem ausführen").

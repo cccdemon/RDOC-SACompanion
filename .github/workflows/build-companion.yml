@@ -22,6 +22,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write # tauri-action needs this to create the Release on a tag
     steps:
       - uses: actions/checkout@v4
 

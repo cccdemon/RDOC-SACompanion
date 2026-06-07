@@ -22,6 +22,9 @@ winzigen **InitConnection-Server** (Signaling) und **coturn** als NAT-Fallback.
 **Non-Goals:**
 - Kein SFU, keine Server-Mischung von Audio.
 - Keine Discord-Integration (das macht die RDOC-Suite Companion). VoiceMesh ist eigenständig.
+- **Keine Kopplung an den Fleetmanager.** VoiceMesh läuft komplett standalone. Es gibt *optional*
+  eine entkoppelte **Fleetmanager-Session-Vermittlung** (nur Room+Invite, kein coturn, kein Media)
+  — siehe §18. Default bleibt: VoiceMesh kennt den Fleetmanager nicht.
 - Keine großen Fleet-Ops (30-50 Leute) — dafür ist Mesh ungeeignet (siehe §10).
 
 **Design-Cap Raumgröße (MVP):** Warn-Banner ab **12**, Hard-Cap **16** (Join-Ablehnung).
@@ -429,3 +432,40 @@ dann TURN, dann Mesh, **UI/Branding zuletzt**. Jede Phase ist für sich testbar.
 
 **Cap (entschieden 2026-06-05):** MVP **warn@12 / hard@16**. Ziel-Ceiling 24 erst nach
 Mesh-Last-Test in Phase 6 hochziehen (276 Links bei N=24 → Join/ICE-Storm muss erst bewiesen sein).
+
+---
+
+## 18. Optionale Erweiterung: Fleetmanager-Integration (nur Session-Vermittlung)
+
+> **Optional + entkoppelt.** Der Fleetmanager hat mit VoiceMesh **erstmal nichts zu tun** —
+> VoiceMesh bleibt standalone der Default. Diese Erweiterung ist **reine Session-Vermittlung**:
+> der Fleetmanager sagt nur „diese Operation gehört zu *diesem* VoiceMesh-Room, hier ist dein
+> Join-Link". **Kein coturn, kein Media, kein SFU.** Audio bleibt P2P, Signaling bleibt Init.
+
+**Macht / macht NICHT:**
+
+| Macht | Macht NICHT |
+|---|---|
+| Pro Operation einen Room-Namen (`op-<id>`) + signierten Invite-Token erzeugen | Audio anfassen/relayen |
+| Join-Deep-Link verteilen (Op-Seite / Discord-DM), analog zum bestehenden Mission-Deep-Link der RDOC-Suite | coturn/TURN bereitstellen oder voraussetzen |
+| Optional das Roster vorab befüllen (erwartete Teilnehmer) | Den Init-Server ersetzen — Signaling bleibt Init |
+| | VoiceMesh zur Pflicht machen — das RDOC-Suite-Voice (LiveKit/Relay-Bots) bleibt davon unberührt |
+
+**Flow:**
+1. Fleetmanager (optional, env-gated) erzeugt für die Op `room = "op-<id>"` + einen Invite-Token
+   (HMAC, gleiche Form wie Init Room-Auth §15.4 / TURN-Creds §8).
+2. Zeigt einen Join-Deep-Link: `rdoc-voicemesh://join?init=wss://init.…&room=op-<id>&token=…`
+   (analog zum Companion-Mission-Link der RDOC-Suite).
+3. Crew klickt → VoiceMesh-App öffnet, joined direkt den Room über Init → normales P2P-Mesh.
+
+**Kopplung bewusst minimal:**
+- **Ein geteiltes Secret** zwischen Fleetmanager und Init (Room-Auth-Signatur) — sonst nichts.
+  Fleetmanager mintet den Token zustandslos selbst, *oder* ruft eine winzige Init-API `POST /rooms`.
+  **Keine DB-Kopplung, kein gemeinsamer State.**
+- Die VoiceMesh-App braucht nur einen Deep-Link-Handler (`rdoc-voicemesh://`) — **null
+  Fleetmanager-Wissen** im Client.
+- Fällt der Fleetmanager weg → VoiceMesh unverändert (manueller Room/Invite wie immer).
+
+**Abgrenzung:** Die RDOC-Suite hat ihr eigenes Voice (LiveKit-SFU + Relay-Bots, Discord-gebunden).
+VoiceMesh ist die **alternative, serverlose** Voice-Option für kleine Squads. Die Integration ist
+**nur Session-Vermittlung** — kein Ersatz, keine Vermischung der zwei Voice-Stacks, kein coturn.

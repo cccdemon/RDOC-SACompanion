@@ -12,7 +12,8 @@ mkdir -p "$DEST"
 
 # Newest release is first in the array; grab its asset URLs (incl. prereleases).
 urls="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$API" \
-  | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4)"
+  | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4 || true)"
+[ -n "$urls" ] || { echo "no releases yet"; exit 0; }
 
 fetch() {
   # $1 = case-insensitive filename suffix to match, $2 = output filename

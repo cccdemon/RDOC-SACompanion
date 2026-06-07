@@ -30,9 +30,11 @@ async fn connect(
     name: String,
     token: Option<String>,
     cert_sha256: Option<String>,
+    input_device: Option<String>,
+    output_device: Option<String>,
 ) -> Result<(), String> {
     let engine = start(
-        EngineConfig { server, room, user_id, name, token, cert_sha256 },
+        EngineConfig { server, room, user_id, name, token, cert_sha256, input_device, output_device },
         make_sink(&app),
     )
     .await
@@ -98,6 +100,25 @@ fn send_chat(state: State<AppState>, text: String) {
     }
 }
 
+#[tauri::command]
+fn set_master_volume(state: State<AppState>, volume: f32) {
+    if let Some(e) = state.engine.lock().unwrap().as_ref() {
+        e.set_master_volume(volume);
+    }
+}
+
+#[tauri::command]
+fn set_peer_volume(state: State<AppState>, user_id: String, volume: f32) {
+    if let Some(e) = state.engine.lock().unwrap().as_ref() {
+        e.set_peer_volume(&user_id, volume);
+    }
+}
+
+#[tauri::command]
+fn list_audio_devices() -> (Vec<String>, Vec<String>) {
+    companion_core::audio::list_devices()
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -109,7 +130,10 @@ fn main() {
             serverless_accept_answer,
             toggle_transmit,
             set_transmit,
-            send_chat
+            send_chat,
+            set_master_volume,
+            set_peer_volume,
+            list_audio_devices
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri app");

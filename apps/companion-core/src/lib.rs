@@ -64,6 +64,8 @@ pub struct EngineConfig {
     pub name: String,
     pub token: Option<String>,
     pub cert_sha256: Option<String>,
+    pub input_device: Option<String>,
+    pub output_device: Option<String>,
 }
 
 enum Cmd {
@@ -75,6 +77,7 @@ enum Cmd {
 /// Handle to the running engine; methods are non-blocking.
 pub struct Engine {
     cmd_tx: mpsc::UnboundedSender<Cmd>,
+    gains: Arc<audio::Gains>,
 }
 impl Engine {
     pub fn toggle_transmit(&self) {
@@ -86,6 +89,14 @@ impl Engine {
     }
     pub fn send_chat(&self, text: String) {
         let _ = self.cmd_tx.send(Cmd::Chat(text));
+    }
+    /// Overall output volume (0.0 mute … 1.0 normal … 2.0 +6 dB). Live.
+    pub fn set_master_volume(&self, v: f32) {
+        self.gains.set_master(v);
+    }
+    /// Per-participant output volume (by user_id). Live.
+    pub fn set_peer_volume(&self, user_id: &str, v: f32) {
+        self.gains.set_peer(user_id, v);
     }
 }
 
@@ -101,20 +112,25 @@ pub(crate) fn build_api() -> Result<API> {
 /// the server-signaled mesh and the serverless 1:1 mode. Returns the transmit
 /// flag, the encoded-Opus receiver (feed to the local track writer), and the
 /// decode sender (feed remote RTP payloads in).
-pub(crate) fn setup_audio() -> Result<(
+pub(crate) fn setup_audio(
+    in_name: Option<String>,
+    out_name: Option<String>,
+) -> Result<(
     Arc<AtomicBool>,
     mpsc::UnboundedReceiver<Bytes>,
     mpsc::UnboundedSender<(String, Bytes)>,
+    Arc<audio::Gains>,
 )> {
     let cap: Buf = Arc::new(Mutex::new(VecDeque::new()));
     let play: Buf = Arc::new(Mutex::new(VecDeque::new()));
     let mix: MixMap = Arc::new(Mutex::new(HashMap::new()));
     let transmit = Arc::new(AtomicBool::new(false));
+    let gains = Arc::new(audio::Gains::new());
 
     let (rate_tx, rate_rx) = std::sync::mpsc::channel::<(u32, u32)>();
     {
         let (cap, play) = (cap.clone(), play.clone());
-        std::thread::spawn(move || audio::run_devices(cap, play, rate_tx));
+        std::thread::spawn(move || audio::run_devices(cap, play, rate_tx, in_name, out_name));
     }
     let (in_rate, out_rate) = rate_rx.recv()?;
 
@@ -128,9 +144,12 @@ pub(crate) fn setup_audio() -> Result<(
         let mix = mix.clone();
         std::thread::spawn(move || audio::decode_loop(decode_rx, mix));
     }
-    std::thread::spawn(move || audio::mixer_loop(mix, play, out_rate));
+    {
+        let gains = gains.clone();
+        std::thread::spawn(move || audio::mixer_loop(mix, play, out_rate, gains));
+    }
 
-    Ok((transmit, opus_rx, decode_tx))
+    Ok((transmit, opus_rx, decode_tx, gains))
 }
 
 struct Member {
@@ -173,7 +192,8 @@ fn emit_roster(
 pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let (transmit, mut opus_rx, decode_tx) = setup_audio()?;
+    let (transmit, mut opus_rx, decode_tx, gains) =
+        setup_audio(cfg.input_device.clone(), cfg.output_device.clone())?;
 
     let api = Arc::new(build_api()?);
     let local = Arc::new(TrackLocalStaticSample::new(
@@ -255,7 +275,11 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                 }
                 ev = mesh_rx.recv() => {
                     match ev {
-                        Some(MeshEvent::Chat { from, text }) => sink(UiEvent::Chat { from, text }),
+                        Some(MeshEvent::Chat { from, text }) => {
+                            // `from` is the peer's user_id → show their display name.
+                            let name = members.get(&from).map(|m| m.name.clone()).unwrap_or(from);
+                            sink(UiEvent::Chat { from: name, text });
+                        }
                         Some(MeshEvent::Badge { peer, badge }) => {
                             if let Some(m) = members.get_mut(&peer) { m.badge = Some(badge); }
                             emit_roster(&sink, &members, &me_id, &me_name, transmit.load(Ordering::SeqCst));
@@ -291,5 +315,5 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
         }
     });
 
-    Ok(Engine { cmd_tx })
+    Ok(Engine { cmd_tx, gains })
 }

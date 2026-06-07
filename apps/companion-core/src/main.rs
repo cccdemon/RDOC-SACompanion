@@ -31,6 +31,8 @@ async fn main() -> Result<()> {
         user_id: user,
         token: std::env::var("TOKEN").ok(),
         cert_sha256: std::env::var("CERT_SHA256").ok(),
+        input_device: std::env::var("IN_DEVICE").ok(),
+        output_device: std::env::var("OUT_DEVICE").ok(),
     };
 
     let sink: Sink = Arc::new(|ev| match ev {

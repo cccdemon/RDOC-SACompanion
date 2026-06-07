@@ -22,6 +22,45 @@ pub const FRAME: usize = 960; // 20 ms mono @ 48 kHz
 pub type Buf = Arc<Mutex<VecDeque<i16>>>;
 pub type MixMap = Arc<Mutex<HashMap<String, VecDeque<i16>>>>;
 
+/// Output gains: one master + per-peer (user_id → factor). 1.0 = unchanged.
+/// Applied live in the mixer; both clamp to 0.0..2.0 (0 = mute, 2 = +6 dB).
+#[derive(Default)]
+pub struct Gains {
+    master: Mutex<Option<f32>>, // None ⇒ 1.0
+    peers: Mutex<HashMap<String, f32>>,
+}
+impl Gains {
+    pub fn new() -> Self {
+        Gains { master: Mutex::new(Some(1.0)), peers: Mutex::new(HashMap::new()) }
+    }
+    pub fn set_master(&self, v: f32) {
+        *self.master.lock().unwrap() = Some(v.clamp(0.0, 2.0));
+    }
+    pub fn set_peer(&self, peer: &str, v: f32) {
+        self.peers.lock().unwrap().insert(peer.to_string(), v.clamp(0.0, 2.0));
+    }
+    fn master_v(&self) -> f32 {
+        self.master.lock().unwrap().unwrap_or(1.0)
+    }
+    fn peer_v(&self, peer: &str) -> f32 {
+        *self.peers.lock().unwrap().get(peer).unwrap_or(&1.0)
+    }
+}
+
+/// List input + output device names for the settings UI.
+pub fn list_devices() -> (Vec<String>, Vec<String>) {
+    let host = cpal::default_host();
+    let ins = host
+        .input_devices()
+        .map(|it| it.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default();
+    let outs = host
+        .output_devices()
+        .map(|it| it.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default();
+    (ins, outs)
+}
+
 /// Streaming linear resampler (mono f32), phase preserved across calls.
 pub struct Resampler {
     step: f64,
@@ -58,12 +97,11 @@ struct Picked {
     rate: u32,
 }
 
-fn choose(host: &cpal::Host, input: bool) -> Result<Picked> {
+fn choose(host: &cpal::Host, input: bool, want: Option<&str>) -> Result<Picked> {
     let kind = if input { "Input" } else { "Output" };
     let devs: Vec<cpal::Device> =
         if input { host.input_devices()?.collect() } else { host.output_devices()?.collect() };
-    let want = std::env::var(if input { "IN_DEVICE" } else { "OUT_DEVICE" }).ok();
-    let device = if let Some(w) = &want {
+    let device = if let Some(w) = want.filter(|s| !s.is_empty()) {
         devs.iter()
             .find(|d| d.name().map(|n| n.contains(w)).unwrap_or(false))
             .cloned()
@@ -153,10 +191,18 @@ fn build_output(p: &Picked, play: Buf) -> Result<cpal::Stream> {
 
 /// Device thread: pick devices, build + play streams, report rates, then park
 /// (cpal streams must outlive the program and stay off the async runtime).
-pub fn run_devices(cap: Buf, play: Buf, rate_tx: std::sync::mpsc::Sender<(u32, u32)>) {
+pub fn run_devices(
+    cap: Buf,
+    play: Buf,
+    rate_tx: std::sync::mpsc::Sender<(u32, u32)>,
+    in_name: Option<String>,
+    out_name: Option<String>,
+) {
     let host = cpal::default_host();
-    let inp = choose(&host, true).expect("Input-Device");
-    let outp = choose(&host, false).expect("Output-Device");
+    let in_want = in_name.or_else(|| std::env::var("IN_DEVICE").ok());
+    let out_want = out_name.or_else(|| std::env::var("OUT_DEVICE").ok());
+    let inp = choose(&host, true, in_want.as_deref()).expect("Input-Device");
+    let outp = choose(&host, false, out_want.as_deref()).expect("Output-Device");
     eprintln!(
         "Input : {} @ {}Hz | Output: {} @ {}Hz",
         inp.device.name().unwrap_or_default(),
@@ -252,7 +298,7 @@ pub fn decode_loop(mut rx: UnboundedReceiver<(String, Bytes)>, mix: MixMap) {
 
 /// 20ms clock: sum each peer's 48k frame (int16 clamp), resample 48k→out, push
 /// to the playback ring.
-pub fn mixer_loop(mix: MixMap, play: Buf, out_rate: u32) {
+pub fn mixer_loop(mix: MixMap, play: Buf, out_rate: u32, gains: Arc<Gains>) {
     let mut down = Resampler::new(OPUS_SR, out_rate);
     loop {
         std::thread::sleep(Duration::from_millis(20));
@@ -260,15 +306,16 @@ pub fn mixer_loop(mix: MixMap, play: Buf, out_rate: u32) {
         let mut any = false;
         {
             let mut m = mix.lock().unwrap();
-            for b in m.values_mut() {
+            for (peer, b) in m.iter_mut() {
                 // Take up to one frame; a partially-filled peer contributes what
                 // it has (rest = silence) instead of being dropped → smoother
-                // mix with several simultaneous speakers.
+                // mix with several simultaneous speakers. Apply this peer's gain.
                 let n = b.len().min(FRAME);
                 if n > 0 {
                     any = true;
+                    let g = gains.peer_v(peer);
                     for x in mixed.iter_mut().take(n) {
-                        *x += b.pop_front().unwrap() as i32;
+                        *x += (b.pop_front().unwrap() as f32 * g) as i32;
                     }
                 }
             }
@@ -276,7 +323,9 @@ pub fn mixer_loop(mix: MixMap, play: Buf, out_rate: u32) {
         if !any {
             continue;
         }
-        let f: Vec<f32> = mixed.iter().map(|&v| v.clamp(-32768, 32767) as f32 / 32768.0).collect();
+        let master = gains.master_v();
+        let f: Vec<f32> =
+            mixed.iter().map(|&v| (v as f32 * master).clamp(-32768.0, 32767.0) / 32768.0).collect();
         let mut o: Vec<f32> = Vec::new();
         down.process(&f, &mut o);
         let mut p = play.lock().unwrap();

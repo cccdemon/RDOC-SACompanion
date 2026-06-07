@@ -44,6 +44,44 @@ export default function App() {
   const [joinInput, setJoinInput] = useState("");
   const [joinPin, setJoinPin] = useState("");
 
+  // Audio settings (gear): device choice + volumes.
+  const [showSettings, setShowSettings] = useState(false);
+  const [devices, setDevices] = useState<{ inputs: string[]; outputs: string[] }>({ inputs: [], outputs: [] });
+  const [audioCfg, setAudioCfg] = useState<{ input: string; output: string }>(() => {
+    try {
+      const s = localStorage.getItem("sa.audio");
+      if (s) return JSON.parse(s);
+    } catch {
+      /* ignore */
+    }
+    return { input: "", output: "" };
+  });
+  const [masterVol, setMasterVol] = useState(100); // percent
+  const [peerVol, setPeerVol] = useState<Record<string, number>>({});
+
+  // Load device list once (for the gear settings).
+  useEffect(() => {
+    invoke<[string[], string[]]>("list_audio_devices")
+      .then(([inputs, outputs]) => setDevices({ inputs, outputs }))
+      .catch(() => {});
+  }, []);
+  const saveAudioCfg = (next: { input: string; output: string }) => {
+    setAudioCfg(next);
+    try {
+      localStorage.setItem("sa.audio", JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+  const onMaster = (v: number) => {
+    setMasterVol(v);
+    invoke("set_master_volume", { volume: v / 100 }).catch(() => {});
+  };
+  const onPeerVol = (userId: string, v: number) => {
+    setPeerVol((m) => ({ ...m, [userId]: v }));
+    invoke("set_peer_volume", { userId, volume: v / 100 }).catch(() => {});
+  };
+
   useEffect(() => {
     const un = listen<UiEvent>("ui", (e) => {
       const p = e.payload;
@@ -110,6 +148,8 @@ export default function App() {
       name: form.name.trim() || "Commander",
       token: token || null,
       certSha256: null,
+      inputDevice: audioCfg.input || null,
+      outputDevice: audioCfg.output || null,
     });
   };
   const createSession = async () => {
@@ -158,12 +198,38 @@ export default function App() {
     }
   };
 
+  const deviceSettings = (
+    <div className="settings">
+      <label>🎤 Mikrofon</label>
+      <select value={audioCfg.input} onChange={(e) => saveAudioCfg({ ...audioCfg, input: e.target.value })}>
+        <option value="">Standard-Gerät</option>
+        {devices.inputs.map((d) => <option key={d} value={d}>{d}</option>)}
+      </select>
+      <label>🔊 Ausgabe</label>
+      <select value={audioCfg.output} onChange={(e) => saveAudioCfg({ ...audioCfg, output: e.target.value })}>
+        <option value="">Standard-Gerät</option>
+        {devices.outputs.map((d) => <option key={d} value={d}>{d}</option>)}
+      </select>
+      <div className="sub2" style={{ opacity: 0.7 }}>Geräteänderung wird beim nächsten Verbinden aktiv.</div>
+    </div>
+  );
+  const encFooter = (
+    <div className="encfoot">
+      🔒 Encryption: <b>DTLS-SRTP</b> (Audio) · <b>DTLS-SCTP</b> (Chat) · <b>TLS/wss</b> (Signaling)
+      — Ende-zu-Ende P2P, encrypted by default &amp; by session
+    </div>
+  );
+
   if (!connected) {
     return (
       <div className="screen center">
         <div className="card connect">
-          <div className="brand">RDOC <span>// SQUADLINK LITE</span></div>
+          <div className="brandrow">
+            <div className="brand">RDOC <span>// SQUADLINK LITE</span></div>
+            <button className="gear" title="Audio-Einstellungen" onClick={() => setShowSettings((s) => !s)}>⚙</button>
+          </div>
           <div className="sub">P2P Voice + Chat</div>
+          {showSettings && deviceSettings}
 
           <label>Name</label>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Commander" />
@@ -197,10 +263,14 @@ export default function App() {
             </button>
           </div>
           {log && <div className="err">{log}</div>}
+          {encFooter}
         </div>
       </div>
     );
   }
+
+  const p2pCount = participants.filter((p) => !p.you && p.badge).length;
+  const kbps = p2pCount * 32; // ~32 kbps Opus per peer-stream (estimate)
 
   return (
     <div className="screen app">
@@ -208,7 +278,22 @@ export default function App() {
         <div className="brand sm">RDOC <span>// SQUADLINK LITE</span></div>
         <div className={`dot ${transmitting ? "tx" : "ok"}`} />
         <div className="hstatus">{transmitting ? "SENDEN" : "VERBUNDEN"}</div>
+        <button className="gear" title="Audio-Einstellungen" onClick={() => setShowSettings((s) => !s)}>⚙</button>
       </header>
+      {showSettings && deviceSettings}
+
+      <div className="netbar">
+        <span>P2P: <b>{p2pCount}</b></span>
+        <span>↑ ~{kbps} kbps</span>
+        <span>↓ ~{kbps} kbps</span>
+        <span className="netest">(geschätzt)</span>
+      </div>
+
+      <div className="volrow">
+        <span className="vlabel">🔊 Gesamt</span>
+        <input type="range" min={0} max={200} value={masterVol} onChange={(e) => onMaster(Number(e.target.value))} />
+        <span className="vval">{masterVol}%</span>
+      </div>
 
       <main>
         <section className="roster">
@@ -227,15 +312,30 @@ export default function App() {
           <div className="hsec">Teilnehmer · {participants.length}</div>
           {participants.map((p) => (
             <div key={p.user_id} className={`peer ${p.speaking ? "speaking" : ""}`}>
-              <span className={`talk ${p.speaking ? "on" : ""}`} />
-              <span className="pname">
-                {p.name}
-                {p.you && <span className="me"> (du)</span>}
-              </span>
-              {p.badge && (
-                <span className={`badge ${p.badge.includes("RELAY") ? "relay" : "direct"}`}>
-                  {p.badge}
+              <div className="peerhead">
+                <span className={`talk ${p.speaking ? "on" : ""}`} />
+                <span className="pname">
+                  {p.name}
+                  {p.you && <span className="me"> (du)</span>}
                 </span>
+                {p.badge && (
+                  <span className={`badge ${p.badge.includes("RELAY") ? "relay" : "direct"}`}>
+                    {p.badge}
+                  </span>
+                )}
+              </div>
+              {!p.you && (
+                <div className="peervol">
+                  <span className="vmini">🔊</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={200}
+                    value={peerVol[p.user_id] ?? 100}
+                    onChange={(e) => onPeerVol(p.user_id, Number(e.target.value))}
+                  />
+                  <span className="vval">{peerVol[p.user_id] ?? 100}%</span>
+                </div>
               )}
             </div>
           ))}
@@ -268,6 +368,7 @@ export default function App() {
         </section>
       </main>
       {log && <div className="footlog">{log}</div>}
+      {encFooter}
     </div>
   );
 }

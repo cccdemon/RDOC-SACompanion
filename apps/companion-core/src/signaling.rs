@@ -91,13 +91,19 @@ fn pinned_connector(cert_sha256: &str) -> Result<Connector> {
 
 pub async fn connect(url: &str, cert_sha256: Option<&str>) -> Result<Signaling> {
     let ws = if url.starts_with("wss://") {
-        let pin = cert_sha256
-            .ok_or_else(|| anyhow!("wss:// braucht CERT_SHA256 (Fingerprint vom Server-Start) zum Pinnen"))?;
-        let connector = pinned_connector(pin)?;
-        let (ws, _) =
-            tokio_tungstenite::connect_async_tls_with_config(url, None, false, Some(connector))
-                .await?;
-        ws
+        if let Some(pin) = cert_sha256 {
+            // Self-signed server → pin its cert by SHA-256 (no CA).
+            let connector = pinned_connector(pin)?;
+            let (ws, _) =
+                tokio_tungstenite::connect_async_tls_with_config(url, None, false, Some(connector))
+                    .await?;
+            ws
+        } else {
+            // No pin → standard CA validation (webpki roots). Works for real
+            // certs like Let's Encrypt (e.g. squadlink.raumdock.org behind Caddy).
+            let (ws, _) = tokio_tungstenite::connect_async(url).await?;
+            ws
+        }
     } else {
         if url.starts_with("ws://") && !is_loopback(url) {
             bail!("ws:// nur für Loopback erlaubt — nutze wss:// (Nichts verlässt unverschlüsselt den Rechner)");

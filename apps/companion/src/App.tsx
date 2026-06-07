@@ -34,22 +34,15 @@ export default function App() {
     } catch {
       /* ignore */
     }
-    return { server: "wss://squadlink.raumdock.org/ws", room: "op1", name: "", token: "", certSha256: "" };
+    return { name: "" };
   });
   const [msg, setMsg] = useState("");
   const chatEnd = useRef<HTMLDivElement>(null);
 
-  // Session brokering (PIN-protected link) + serverless 1:1 (copy-paste SDP) state.
-  const [mode, setMode] = useState<"session" | "server" | "serverless">("session");
+  // Session brokering (PIN-protected link).
   const [sessionInfo, setSessionInfo] = useState<{ link: string; pin: string; code: string } | null>(null);
   const [joinInput, setJoinInput] = useState("");
   const [joinPin, setJoinPin] = useState("");
-  const [srole, setSrole] = useState<"a" | "b" | null>(null);
-  const [offerOut, setOfferOut] = useState("");
-  const [answerIn, setAnswerIn] = useState("");
-  const [offerIn, setOfferIn] = useState("");
-  const [answerOut, setAnswerOut] = useState("");
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const un = listen<UiEvent>("ui", (e) => {
@@ -82,68 +75,10 @@ export default function App() {
     };
   }, [connected]);
 
-  const onConnect = async () => {
-    setLog("");
-    setConnecting(true);
-    try {
-      localStorage.setItem("sa.form", JSON.stringify(form));
-    } catch {
-      /* ignore */
-    }
-    const name = form.name.trim() || "Commander";
-    const userId = crypto.randomUUID().slice(0, 8);
-    try {
-      await invoke("connect", {
-        server: form.server.trim(),
-        room: form.room.trim(),
-        userId,
-        name,
-        token: form.token.trim() || null,
-        certSha256: form.certSha256.trim() || null,
-      });
-    } catch (err) {
-      setLog(String(err));
-      setConnecting(false);
-    }
-  };
-
   const copy = (t: string) => navigator.clipboard?.writeText(t);
-  const slOffer = async () => {
-    setBusy(true);
-    setLog("");
-    try {
-      const c = await invoke<string>("serverless_offer", { name: form.name.trim() || "Commander" });
-      setOfferOut(c);
-    } catch (e) {
-      setLog(String(e));
-    }
-    setBusy(false);
-  };
-  const slAcceptAnswer = async () => {
-    try {
-      await invoke("serverless_accept_answer", { code: answerIn.trim() });
-    } catch (e) {
-      setLog(String(e));
-    }
-  };
-  const slAcceptOffer = async () => {
-    setBusy(true);
-    setLog("");
-    try {
-      const a = await invoke<string>("serverless_accept_offer", {
-        name: form.name.trim() || "Commander",
-        code: offerIn.trim(),
-      });
-      setAnswerOut(a);
-    } catch (e) {
-      setLog(String(e));
-    }
-    setBusy(false);
-  };
 
   // ── Session brokering (PIN-protected link via InitConnection REST) ──────────
-  // The session service is the hosted public endpoint — independent of the
-  // (editable, possibly localhost) "Server" field used by the advanced SERVER tab.
+  // The session service is the hosted public endpoint.
   const SESSION_BASE = "https://squadlink.raumdock.org";
   const parseCode = (s: string) => {
     const t = s.trim();
@@ -230,106 +165,37 @@ export default function App() {
           <div className="brand">RDOC <span>// SQUADLINK LITE</span></div>
           <div className="sub">P2P Voice + Chat</div>
 
-          <div className="tabs">
-            <button className={mode === "session" ? "tab on" : "tab"} onClick={() => setMode("session")}>SESSION</button>
-            <button className={mode === "server" ? "tab on" : "tab"} onClick={() => setMode("server")}>SERVER</button>
-            <button className={mode === "serverless" ? "tab on" : "tab"} onClick={() => setMode("serverless")}>SERVERLESS</button>
-          </div>
-
           <label>Name</label>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Commander" />
 
-          {mode === "session" && (
-            <div className="session">
-              <div className="sub2">
-                Host erstellt eine Session und teilt <b>Link + 6-stellige PIN</b>. Mitspieler treten
-                mit Link/Code + PIN bei — ohne Konfiguration. (Vermittlungsserver = Feld „Server" im
-                SERVER-Tab; Standard ist gesetzt.)
+          <div className="session">
+            <div className="sub2">
+              <b>Host:</b> Session erstellen → <b>Link + 6-stellige PIN</b> an die Mitspieler geben.
+              <br /><b>Mitspieler:</b> Link/Code + PIN eingeben — komplett ohne Konfiguration.
+            </div>
+            <button className="btn primary" onClick={createSession} disabled={connecting}>
+              {connecting ? "…" : "SESSION ERSTELLEN (HOST)"}
+            </button>
+            {sessionInfo && (
+              <div className="sessbox">
+                <label>Link — an Mitspieler</label>
+                <input readOnly value={sessionInfo.link} className="mono" onFocus={(e) => e.currentTarget.select()} />
+                <label>PIN — separat weitergeben</label>
+                <div className="pin mono">{sessionInfo.pin}</div>
+                <button className="btn sm" onClick={() => copy(`${sessionInfo.link}\nPIN: ${sessionInfo.pin}`)}>
+                  LINK + PIN KOPIEREN
+                </button>
               </div>
-              <button className="btn primary" onClick={createSession} disabled={connecting}>
-                {connecting ? "…" : "SESSION ERSTELLEN (HOST)"}
-              </button>
-              {sessionInfo && (
-                <div className="sessbox">
-                  <label>Link — an Mitspieler</label>
-                  <input readOnly value={sessionInfo.link} className="mono" onFocus={(e) => e.currentTarget.select()} />
-                  <label>PIN — separat weitergeben</label>
-                  <div className="pin mono">{sessionInfo.pin}</div>
-                  <button className="btn sm" onClick={() => copy(`${sessionInfo.link}\nPIN: ${sessionInfo.pin}`)}>
-                    LINK + PIN KOPIEREN
-                  </button>
-                </div>
-              )}
-              <div className="sub2" style={{ marginTop: "1rem", opacity: 0.7 }}>— oder beitreten —</div>
-              <label>Link oder Code</label>
-              <input value={joinInput} onChange={(e) => setJoinInput(e.target.value)} placeholder="https://…/j/abc oder abc" className="mono" spellCheck={false} />
-              <label>PIN (6-stellig)</label>
-              <input value={joinPin} onChange={(e) => setJoinPin(e.target.value)} inputMode="numeric" maxLength={6} placeholder="123456" />
-              <button className="btn primary" onClick={joinSession} disabled={connecting || !joinInput.trim() || joinPin.trim().length < 6}>
-                {connecting ? "VERBINDE…" : "BEITRETEN"}
-              </button>
-            </div>
-          )}
-          {mode === "server" && (
-            <>
-              <label>Server</label>
-              <input value={form.server} onChange={(e) => setForm({ ...form, server: e.target.value })} spellCheck={false} className="mono" />
-              <label>Room</label>
-              <input value={form.room} onChange={(e) => setForm({ ...form, room: e.target.value })} spellCheck={false} />
-              <label>Room-Token <span className="opt">(optional)</span></label>
-              <input value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} spellCheck={false} />
-              <label>CERT_SHA256 <span className="opt">(nur für wss://)</span></label>
-              <input value={form.certSha256} onChange={(e) => setForm({ ...form, certSha256: e.target.value })} spellCheck={false} className="mono" />
-              <button className="btn primary" onClick={onConnect} disabled={connecting}>
-                {connecting ? "VERBINDE…" : "VERBINDEN"}
-              </button>
-            </>
-          )}
-          {mode === "serverless" && (
-            <div className="serverless">
-              <div className="sub2">Kein Server — SDP-Codes per Discord/Chat austauschen. STUN für NAT; hartes NAT ohne TURN = evtl. kein Connect.</div>
-              {!srole && (
-                <div className="srole">
-                  <button className="btn" onClick={() => setSrole("a")}>ANRUF STARTEN (A)</button>
-                  <button className="btn" onClick={() => setSrole("b")}>ANRUF ANNEHMEN (B)</button>
-                </div>
-              )}
-              {srole === "a" && (
-                <>
-                  {!offerOut ? (
-                    <button className="btn primary" onClick={slOffer} disabled={busy}>{busy ? "ERZEUGE…" : "1) OFFER ERZEUGEN"}</button>
-                  ) : (
-                    <>
-                      <label>Dein Offer-Code → an Peer schicken</label>
-                      <textarea readOnly value={offerOut} className="mono code" />
-                      <button className="btn sm" onClick={() => copy(offerOut)}>KOPIEREN</button>
-                      <label>2) Answer-Code vom Peer einfügen</label>
-                      <textarea value={answerIn} onChange={(e) => setAnswerIn(e.target.value)} className="mono code" placeholder="Answer-Code…" />
-                      <button className="btn primary" onClick={slAcceptAnswer} disabled={!answerIn.trim()}>VERBINDEN</button>
-                    </>
-                  )}
-                  <button className="btn ghost sm" onClick={() => { setSrole(null); setOfferOut(""); setAnswerIn(""); }}>zurück</button>
-                </>
-              )}
-              {srole === "b" && (
-                <>
-                  <label>1) Offer-Code vom Peer einfügen</label>
-                  <textarea value={offerIn} onChange={(e) => setOfferIn(e.target.value)} className="mono code" placeholder="Offer-Code…" />
-                  {!answerOut ? (
-                    <button className="btn primary" onClick={slAcceptOffer} disabled={busy || !offerIn.trim()}>{busy ? "…" : "ANNEHMEN"}</button>
-                  ) : (
-                    <>
-                      <label>2) Dein Answer-Code → zurück an Peer</label>
-                      <textarea readOnly value={answerOut} className="mono code" />
-                      <button className="btn sm" onClick={() => copy(answerOut)}>KOPIEREN</button>
-                      <div className="sub2">Sobald der Peer den Code einfügt, verbindet ihr euch.</div>
-                    </>
-                  )}
-                  <button className="btn ghost sm" onClick={() => { setSrole(null); setOfferIn(""); setAnswerOut(""); }}>zurück</button>
-                </>
-              )}
-            </div>
-          )}
+            )}
+            <div className="sub2" style={{ marginTop: "1rem", opacity: 0.7 }}>— oder beitreten —</div>
+            <label>Link oder Code</label>
+            <input value={joinInput} onChange={(e) => setJoinInput(e.target.value)} placeholder="https://…/j/abc oder abc" className="mono" spellCheck={false} />
+            <label>PIN (6-stellig)</label>
+            <input value={joinPin} onChange={(e) => setJoinPin(e.target.value)} inputMode="numeric" maxLength={6} placeholder="123456" />
+            <button className="btn primary" onClick={joinSession} disabled={connecting || !joinInput.trim() || joinPin.trim().length < 6}>
+              {connecting ? "VERBINDE…" : "BEITRETEN"}
+            </button>
+          </div>
           {log && <div className="err">{log}</div>}
         </div>
       </div>

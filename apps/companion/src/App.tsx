@@ -212,6 +212,18 @@ export default function App() {
 
       <main>
         <section className="roster">
+          {sessionInfo && (
+            <div className="sessbox sessbox-live">
+              <div className="hsec">Session teilen</div>
+              <input readOnly value={sessionInfo.link} className="mono" onFocus={(e) => e.currentTarget.select()} />
+              <div className="pinrow">
+                <span className="pin mono">PIN {sessionInfo.pin}</span>
+                <button className="btn sm" onClick={() => copy(`${sessionInfo.link}\nPIN: ${sessionInfo.pin}`)}>
+                  LINK + PIN
+                </button>
+              </div>
+            </div>
+          )}
           <div className="hsec">Teilnehmer · {participants.length}</div>
           {participants.map((p) => (
             <div key={p.user_id} className={`peer ${p.speaking ? "speaking" : ""}`}>

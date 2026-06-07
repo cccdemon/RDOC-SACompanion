@@ -133,3 +133,9 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 .session { display: flex; flex-direction: column; gap: .5rem; }
 .sessbox { margin-top: .6rem; padding: .7rem; border: 1px solid #1e293b; border-radius: 8px; background: rgba(2,8,20,.5); display: flex; flex-direction: column; gap: .4rem; }
 .pin { font-size: 1.5rem; font-weight: 700; letter-spacing: .18em; color: #38bdf8; padding: .2rem 0; }
+
+/* Share panel inside the connected session (host) */
+.sessbox-live { margin-bottom: .8rem; }
+.sessbox-live input { width: 100%; }
+.pinrow { display: flex; align-items: center; gap: .6rem; margin-top: .35rem; }
+.pinrow .pin { font-size: 1.1rem; flex: 1; }

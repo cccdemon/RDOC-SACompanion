@@ -34,7 +34,7 @@ export default function App() {
     } catch {
       /* ignore */
     }
-    return { server: "ws://127.0.0.1:8080/ws", room: "op1", name: "", token: "", certSha256: "" };
+    return { server: "wss://squadlink.raumdock.org/ws", room: "op1", name: "", token: "", certSha256: "" };
   });
   const [msg, setMsg] = useState("");
   const chatEnd = useRef<HTMLDivElement>(null);
@@ -142,20 +142,15 @@ export default function App() {
   };
 
   // ── Session brokering (PIN-protected link via InitConnection REST) ──────────
-  const httpBase = (server: string) => {
-    try {
-      const u = new URL(server.trim());
-      return `${u.protocol === "wss:" ? "https:" : "http:"}//${u.host}`;
-    } catch {
-      return server.trim().replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/ws$/, "");
-    }
-  };
+  // The session service is the hosted public endpoint — independent of the
+  // (editable, possibly localhost) "Server" field used by the advanced SERVER tab.
+  const SESSION_BASE = "https://squadlink.raumdock.org";
   const parseCode = (s: string) => {
     const t = s.trim();
     const m = t.match(/\/j\/([A-Za-z0-9]+)/);
     return m ? m[1] : t;
   };
-  const baseFromLinkOrServer = (input: string, server: string) => {
+  const baseFromInput = (input: string) => {
     const t = input.trim();
     if (/^https?:\/\//.test(t)) {
       try {
@@ -165,7 +160,7 @@ export default function App() {
         /* fall through */
       }
     }
-    return httpBase(server);
+    return SESSION_BASE;
   };
   const connectWith = async (ws: string, room: string, token: string | null) => {
     try {
@@ -186,8 +181,7 @@ export default function App() {
     setConnecting(true);
     setLog("");
     try {
-      const base = httpBase(form.server);
-      const r = await fetch(`${base}/session`, { method: "POST" });
+      const r = await fetch(`${SESSION_BASE}/session`, { method: "POST" });
       if (!r.ok) throw new Error("Server " + r.status);
       const j = await r.json();
       setSessionInfo({ link: j.link, pin: j.pin, code: j.code });
@@ -202,7 +196,7 @@ export default function App() {
     setLog("");
     try {
       const code = parseCode(joinInput);
-      const base = baseFromLinkOrServer(joinInput, form.server);
+      const base = baseFromInput(joinInput);
       const r = await fetch(`${base}/session/${encodeURIComponent(code)}/join`, {
         method: "POST",
         headers: { "content-type": "application/json" },

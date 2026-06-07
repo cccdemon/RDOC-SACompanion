@@ -59,7 +59,10 @@ jobs:
           # tagName non-empty only on a tag push → tauri-action then cuts a release.
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: RDOC SquadLink Lite ${{ github.ref_name }}
-          releaseDraft: true
+          # Published (not draft) so the server can auto-pull the asset; marked
+          # prerelease because the build is unsigned.
+          releaseDraft: false
+          prerelease: true
           releaseBody: |
             RDOC SquadLink Lite prototype build (Windows).
             Unsigned — Windows SmartScreen will warn; "More info → Run anyway".

@@ -1,0 +1,25 @@
+# InitConnection behind a TLS-terminating reverse proxy (the RDOC-Suite Caddy on
+# the same LXC). Caddy serves wss://squadlink.raumdock.org with a real Cloudflare
+# cert and forwards plain ws to 127.0.0.1:8090 → no self-signed cert pin needed,
+# no home-router port-forward. coturn is intentionally omitted (STUN-only default,
+# ARCHITECTURE §8b) — add it later only if hard-NAT peers need a relay.
+#
+# Deploy on LXC 103 (10.10.10.99):
+#   cd /opt/RDOC-SACompanion && git pull
+#   docker compose -f deploy/docker-compose.proxy.yml up -d --build
+# .env needs: ROOM_AUTH_SECRET (stable HMAC secret for room join tokens).
+
+services:
+  init:
+    build:
+      context: ..
+      dockerfile: server/init/Dockerfile
+    container_name: squadlink-init
+    restart: unless-stopped
+    environment:
+      - ROOM_AUTH_SECRET=${ROOM_AUTH_SECRET}
+      # Caddy terminates TLS; init speaks plain ws on loopback behind it.
+      - TLS_DISABLE=1
+    # Loopback only — the host-network Caddy reaches it; not exposed directly.
+    ports:
+      - "127.0.0.1:8090:8080"

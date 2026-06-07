@@ -20,6 +20,9 @@ services:
       - ROOM_AUTH_SECRET=${ROOM_AUTH_SECRET}
       # Caddy terminates TLS; init speaks plain ws on loopback behind it.
       - TLS_DISABLE=1
+      # Public URLs used to build share links + the ws URL returned on join.
+      - PUBLIC_BASE=https://squadlink.raumdock.org
+      - PUBLIC_WS=wss://squadlink.raumdock.org/ws
     # Loopback only — the host-network Caddy reaches it; not exposed directly.
     ports:
       - "127.0.0.1:8090:8080"

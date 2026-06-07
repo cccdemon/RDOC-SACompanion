@@ -12,6 +12,7 @@
 //! Subcommand: `init-connection mint <room>` prints that room's join token.
 
 mod auth;
+mod sessions;
 mod tls;
 mod turn;
 
@@ -19,16 +20,28 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
-use axum::response::IntoResponse;
-use axum::routing::get;
-use axum::Router;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use futures::{SinkExt, StreamExt};
 use protocol::{ClientMsg, PeerInfo, ServerMsg};
+use serde_json::json;
 use tokio::sync::mpsc;
+use tower_http::cors::CorsLayer;
 
 use auth::AuthConfig;
+use sessions::{JoinError, Sessions};
 use turn::TurnConfig;
+
+/// Public base URL (for share links) + ws URL handed back on join.
+fn public_base() -> String {
+    std::env::var("PUBLIC_BASE").unwrap_or_else(|_| "https://squadlink.raumdock.org".into())
+}
+fn public_ws() -> String {
+    std::env::var("PUBLIC_WS").unwrap_or_else(|_| "wss://squadlink.raumdock.org/ws".into())
+}
 
 /// Soft cap → quality warning. Hard cap → join refused. (ARCHITECTURE §10.)
 const WARN_CAP: usize = 12;
@@ -45,6 +58,7 @@ struct AppState {
     rooms: Mutex<HashMap<String, Room>>,
     auth: AuthConfig,
     turn: Option<TurnConfig>,
+    sessions: Sessions,
 }
 
 #[tokio::main]
@@ -75,11 +89,21 @@ async fn main() -> anyhow::Result<()> {
     let turn = TurnConfig::from_env();
     tracing::info!("TURN minting: {}", if turn.is_some() { "enabled" } else { "disabled" });
 
-    let state = Arc::new(AppState { rooms: Mutex::new(HashMap::new()), auth, turn });
+    let state = Arc::new(AppState {
+        rooms: Mutex::new(HashMap::new()),
+        auth,
+        turn,
+        sessions: Sessions::default(),
+    });
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/healthz", get(|| async { "ok" }))
+        // PIN-protected session brokering (REST, called by the app webview → CORS).
+        .route("/session", post(create_session))
+        .route("/session/:code/join", post(join_session))
+        .route("/j/:code", get(landing))
+        .layer(CorsLayer::permissive())
         .with_state(state);
 
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
@@ -114,6 +138,71 @@ async fn main() -> anyhow::Result<()> {
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
+}
+
+/// Host creates a session → random room + token + 6-digit PIN + share code.
+async fn create_session(State(state): State<Arc<AppState>>) -> Response {
+    let (code, pin, room, token) = state.sessions.create(|r| state.auth.token_for(r));
+    let base = public_base();
+    tracing::info!(%code, %room, "session created");
+    Json(json!({
+        "code": code,
+        "pin": pin,
+        "room": room,
+        "token": token,
+        "ws": public_ws(),
+        "link": format!("{base}/j/{code}"),
+    }))
+    .into_response()
+}
+
+/// Mate resolves a code with the PIN (rate-limited) → room + token.
+async fn join_session(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let pin = body.get("pin").and_then(|v| v.as_str()).unwrap_or("");
+    match state.sessions.join(&code, pin) {
+        Ok((room, token)) => {
+            Json(json!({ "room": room, "token": token, "ws": public_ws() })).into_response()
+        }
+        Err(JoinError::NotFound) => {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response()
+        }
+        Err(JoinError::Locked) => {
+            (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "locked" }))).into_response()
+        }
+        Err(JoinError::BadPin) => {
+            (StatusCode::FORBIDDEN, Json(json!({ "error": "bad_pin" }))).into_response()
+        }
+    }
+}
+
+/// Human landing page for a share link: shows the code + download + instructions.
+async fn landing(Path(code): Path<String>) -> Html<String> {
+    let base = public_base();
+    Html(format!(
+        r#"<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RDOC SquadLink Lite — Session beitreten</title>
+<style>body{{font-family:system-ui,sans-serif;background:#020814;color:#e2e8f0;max-width:34rem;margin:6vh auto;padding:0 1.2rem;line-height:1.6}}
+.code{{font-size:1.6rem;font-weight:700;letter-spacing:.1em;background:#0b1626;border:1px solid #1e293b;border-radius:8px;padding:.6rem 1rem;display:inline-block}}
+a.btn{{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;background:#0284c7;color:#fff;border-radius:8px;text-decoration:none;font-weight:600}}
+.muted{{color:#94a3b8;font-size:.92rem}}</style></head>
+<body>
+<h1>RDOC SquadLink Lite</h1>
+<p>Du wurdest zu einer Voice-Session eingeladen.</p>
+<p class="muted">Session-Code:</p>
+<p class="code">{code}</p>
+<ol>
+<li>App noch nicht installiert? <a href="{base}/download/">Hier herunterladen</a> und installieren.</li>
+<li>App öffnen → <b>Beitreten</b> → Code <code>{code}</code> + die <b>6-stellige PIN</b> (bekommst du vom Host) eingeben.</li>
+</ol>
+<p><a class="btn" href="{base}/download/">SquadLink Lite herunterladen</a></p>
+<p class="muted">Audio läuft direkt Peer-zu-Peer (verschlüsselt). Der Server vermittelt nur.</p>
+</body></html>"#
+    ))
 }
 
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {

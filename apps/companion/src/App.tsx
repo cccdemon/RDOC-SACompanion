@@ -39,8 +39,11 @@ export default function App() {
   const [msg, setMsg] = useState("");
   const chatEnd = useRef<HTMLDivElement>(null);
 
-  // Serverless 1:1 (copy-paste SDP) state.
-  const [mode, setMode] = useState<"server" | "serverless">("server");
+  // Session brokering (PIN-protected link) + serverless 1:1 (copy-paste SDP) state.
+  const [mode, setMode] = useState<"session" | "server" | "serverless">("session");
+  const [sessionInfo, setSessionInfo] = useState<{ link: string; pin: string; code: string } | null>(null);
+  const [joinInput, setJoinInput] = useState("");
+  const [joinPin, setJoinPin] = useState("");
   const [srole, setSrole] = useState<"a" | "b" | null>(null);
   const [offerOut, setOfferOut] = useState("");
   const [answerIn, setAnswerIn] = useState("");
@@ -138,6 +141,85 @@ export default function App() {
     setBusy(false);
   };
 
+  // ── Session brokering (PIN-protected link via InitConnection REST) ──────────
+  const httpBase = (server: string) => {
+    try {
+      const u = new URL(server.trim());
+      return `${u.protocol === "wss:" ? "https:" : "http:"}//${u.host}`;
+    } catch {
+      return server.trim().replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/ws$/, "");
+    }
+  };
+  const parseCode = (s: string) => {
+    const t = s.trim();
+    const m = t.match(/\/j\/([A-Za-z0-9]+)/);
+    return m ? m[1] : t;
+  };
+  const baseFromLinkOrServer = (input: string, server: string) => {
+    const t = input.trim();
+    if (/^https?:\/\//.test(t)) {
+      try {
+        const u = new URL(t);
+        return `${u.protocol}//${u.host}`;
+      } catch {
+        /* fall through */
+      }
+    }
+    return httpBase(server);
+  };
+  const connectWith = async (ws: string, room: string, token: string | null) => {
+    try {
+      localStorage.setItem("sa.form", JSON.stringify(form));
+    } catch {
+      /* ignore */
+    }
+    await invoke("connect", {
+      server: ws,
+      room,
+      userId: crypto.randomUUID().slice(0, 8),
+      name: form.name.trim() || "Commander",
+      token: token || null,
+      certSha256: null,
+    });
+  };
+  const createSession = async () => {
+    setConnecting(true);
+    setLog("");
+    try {
+      const base = httpBase(form.server);
+      const r = await fetch(`${base}/session`, { method: "POST" });
+      if (!r.ok) throw new Error("Server " + r.status);
+      const j = await r.json();
+      setSessionInfo({ link: j.link, pin: j.pin, code: j.code });
+      await connectWith(j.ws, j.room, j.token);
+    } catch (e) {
+      setLog(String(e));
+      setConnecting(false);
+    }
+  };
+  const joinSession = async () => {
+    setConnecting(true);
+    setLog("");
+    try {
+      const code = parseCode(joinInput);
+      const base = baseFromLinkOrServer(joinInput, form.server);
+      const r = await fetch(`${base}/session/${encodeURIComponent(code)}/join`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pin: joinPin.trim() }),
+      });
+      if (r.status === 403) throw new Error("Falsche PIN");
+      if (r.status === 429) throw new Error("Zu viele Versuche — Session gesperrt");
+      if (r.status === 404) throw new Error("Session nicht gefunden / abgelaufen");
+      if (!r.ok) throw new Error("Server " + r.status);
+      const j = await r.json();
+      await connectWith(j.ws, j.room, j.token);
+    } catch (e) {
+      setLog(String(e));
+      setConnecting(false);
+    }
+  };
+
   const ptt = () => invoke("toggle_transmit");
   const send = () => {
     const t = msg.trim();
@@ -155,6 +237,7 @@ export default function App() {
           <div className="sub">P2P Voice + Chat</div>
 
           <div className="tabs">
+            <button className={mode === "session" ? "tab on" : "tab"} onClick={() => setMode("session")}>SESSION</button>
             <button className={mode === "server" ? "tab on" : "tab"} onClick={() => setMode("server")}>SERVER</button>
             <button className={mode === "serverless" ? "tab on" : "tab"} onClick={() => setMode("serverless")}>SERVERLESS</button>
           </div>
@@ -162,7 +245,38 @@ export default function App() {
           <label>Name</label>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Commander" />
 
-          {mode === "server" ? (
+          {mode === "session" && (
+            <div className="session">
+              <div className="sub2">
+                Host erstellt eine Session und teilt <b>Link + 6-stellige PIN</b>. Mitspieler treten
+                mit Link/Code + PIN bei — ohne Konfiguration. (Vermittlungsserver = Feld „Server" im
+                SERVER-Tab; Standard ist gesetzt.)
+              </div>
+              <button className="btn primary" onClick={createSession} disabled={connecting}>
+                {connecting ? "…" : "SESSION ERSTELLEN (HOST)"}
+              </button>
+              {sessionInfo && (
+                <div className="sessbox">
+                  <label>Link — an Mitspieler</label>
+                  <input readOnly value={sessionInfo.link} className="mono" onFocus={(e) => e.currentTarget.select()} />
+                  <label>PIN — separat weitergeben</label>
+                  <div className="pin mono">{sessionInfo.pin}</div>
+                  <button className="btn sm" onClick={() => copy(`${sessionInfo.link}\nPIN: ${sessionInfo.pin}`)}>
+                    LINK + PIN KOPIEREN
+                  </button>
+                </div>
+              )}
+              <div className="sub2" style={{ marginTop: "1rem", opacity: 0.7 }}>— oder beitreten —</div>
+              <label>Link oder Code</label>
+              <input value={joinInput} onChange={(e) => setJoinInput(e.target.value)} placeholder="https://…/j/abc oder abc" className="mono" spellCheck={false} />
+              <label>PIN (6-stellig)</label>
+              <input value={joinPin} onChange={(e) => setJoinPin(e.target.value)} inputMode="numeric" maxLength={6} placeholder="123456" />
+              <button className="btn primary" onClick={joinSession} disabled={connecting || !joinInput.trim() || joinPin.trim().length < 6}>
+                {connecting ? "VERBINDE…" : "BEITRETEN"}
+              </button>
+            </div>
+          )}
+          {mode === "server" && (
             <>
               <label>Server</label>
               <input value={form.server} onChange={(e) => setForm({ ...form, server: e.target.value })} spellCheck={false} className="mono" />
@@ -176,7 +290,8 @@ export default function App() {
                 {connecting ? "VERBINDE…" : "VERBINDEN"}
               </button>
             </>
-          ) : (
+          )}
+          {mode === "serverless" && (
             <div className="serverless">
               <div className="sub2">Kein Server — SDP-Codes per Discord/Chat austauschen. STUN für NAT; hartes NAT ohne TURN = evtl. kein Connect.</div>
               {!srole && (

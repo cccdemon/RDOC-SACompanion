@@ -1,6 +1,6 @@
 # Deploy — InitConnection + coturn
 
-Server side of RDOC-SACompanion. **Untested scaffold** — verify before relying on it.
+Server side of RDOC VoiceMesh. **Untested scaffold** — verify before relying on it.
 
 ## Setup
 

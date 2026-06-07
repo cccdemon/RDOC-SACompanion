@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! Tauri shell for RDOC-SACompanion. Thin layer over companion-core: commands
+//! Tauri shell for RDOC VoiceMesh. Thin layer over companion-core: commands
 //! drive the engine, engine state is forwarded to the webview as "ui" events.
 
 use std::sync::{Arc, Mutex};

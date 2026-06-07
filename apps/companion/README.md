@@ -1,4 +1,4 @@
-# RDOC SACompanion (Tauri UI)
+# RDOC VoiceMesh (Tauri UI)
 
 Desktop-UI über die `companion-core`-Engine. Roster mit Verbindungs-Badges
 (DIREKT/RELAY) + Sprech-Anzeige, Push-to-Talk, Chat.

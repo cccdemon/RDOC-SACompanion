@@ -1,4 +1,4 @@
-# RDOC-SACompanion
+# RDOC VoiceMesh
 
 Stand-Alone Companion — serverloses **P2P-Voice-Mesh** zwischen mehreren Companion-Apps,
 ohne SFU (kein LiveKit). Native Audio/Netz in Rust (Tauri-App), gleiches Design wie die

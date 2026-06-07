@@ -1,4 +1,4 @@
-# RDOC-SACompanion — Architektur
+# RDOC VoiceMesh — Architektur
 
 > **Stand-Alone Companion.** Serverloses P2P-Voice-Mesh zwischen mehreren Companion-Apps,
 > ohne SFU (kein LiveKit). Eigenständige App, **außerhalb der RDOC-Suite**, aber gleiches
@@ -21,7 +21,7 @@ winzigen **InitConnection-Server** (Signaling) und **coturn** als NAT-Fallback.
 
 **Non-Goals:**
 - Kein SFU, keine Server-Mischung von Audio.
-- Keine Discord-Integration (das macht die RDOC-Suite Companion). SACompanion ist eigenständig.
+- Keine Discord-Integration (das macht die RDOC-Suite Companion). VoiceMesh ist eigenständig.
 - Keine großen Fleet-Ops (30-50 Leute) — dafür ist Mesh ungeeignet (siehe §10).
 
 **Design-Cap Raumgröße (MVP):** Warn-Banner ab **12**, Hard-Cap **16** (Join-Ablehnung).
@@ -57,7 +57,7 @@ winzigen **InitConnection-Server** (Signaling) und **coturn** als NAT-Fallback.
 
 ## 3. Komponenten
 
-### 3.1 RDOC-SACompanion (Desktop-App)
+### 3.1 RDOC VoiceMesh (Desktop-App)
 Tauri v2. **UI im Webview** (React + kit.css, RDOC-Design wiederverwenden), **Audio + Netz
 komplett in Rust** — KEIN WebView2-Audio (löst nebenbei OBS-Capture, Device-Wahl, Mic-Gain,
 die beim Webview-Companion fragil waren).
@@ -204,6 +204,45 @@ Init generiert das pro Join und schickt `turn {…}`. coturn validiert die HMAC 
 
 ---
 
+## 8b. coturn — wozu und wie bereitstellen
+
+**Wozu überhaupt?** WebRTC versucht **immer zuerst direkt** (host/srflx). **STUN** (zustandslos,
+gratis) löst die Mehrheit der NATs → echtes P2P, der Sinn dieser Architektur. **coturn/TURN** ist
+**nur der Fallback-Relay** für Peer-Paare, die **kein** direktes Candidate-Pair finden: symmetric
+NAT, Carrier-Grade-NAT (Mobilfunk), strenge Firmen-Firewalls. Ohne TURN hören sich genau diese
+Peers gar nicht. TURN relayed dann die **SRTP-Bytes** (kann sie nicht entschlüsseln → Privacy
+bleibt), aber die Bandbreite läuft über den Relay (Traffic/CPU-Kosten) → deshalb **nur für die
+Minderheit**. (STUN = „sag mir meine öffentliche IP", gratis. TURN = „leite mein Audio weiter",
+teuer. coturn kann beides.)
+
+**Spannungsfeld mit „serverless":** TURN ist der **einzige** Baustein, der einen dauerhaften
+zentralen Dienst braucht, *wenn* man Konnektivität garantieren will. Sonst ist das Mesh server-los
+(nur Init fürs Signaling). Konsequenz: **TURN minimieren, nicht zur Pflicht machen.**
+
+**Bereitstellungs-Optionen** (von „am serverlosesten" zu „am robustesten"):
+
+| Variante | Wie | Serverless-Grad | Wann |
+|---|---|---|---|
+| **A — Nur STUN** | Public STUN (Cloudflare/Google) oder coturn-STUN. Kein Relay. | ✅ voll serverless | **Default.** Deckt ~80-90 % ab. Der Serverless-1:1-Modus (§14b) nutzt genau das. Hard-NAT-Peers fallen raus. |
+| **B — Managed TURN** | Cloudflare Calls TURN / Twilio / metered.ca. Init holt/mintet Creds, gibt sie per `turn{}` aus. Kein eigener Server. | ✅ „serverless" (pay-per-GB) | Empfohlen wenn Relay nötig, aber **kein Box-Betrieb** gewünscht. Cloudflare-TURN ist quasi gratis. |
+| **C — coturn beim Init (co-located)** | Eine kleine VM/LXC fährt Init + coturn zusammen (aktueller Prod-Stand). `use-auth-secret`, ephemere HMAC-Creds. | ⚠️ eine Box (self-hosted) | Wenn man alles selbst hostet / volle Kontrolle + DSGVO will. |
+| **D — BYO-TURN pro Org** | App-Setting für eigene TURN-URL + Secret. Squad/Org stellt eigenen coturn. Default-Install bleibt serverless; Relay opt-in. | ✅ Default serverless, Relay optional | Power-User/Orgs mit eigener Infra. |
+
+**Empfehlung (passt zur Serverless-Idee):**
+1. **Default = STUN-only** → die meisten bekommen direktes P2P, **null Infra**.
+2. **TURN als optionaler Add-on**, nicht harte Abhängigkeit:
+   - bequem & serverless-nah: **Managed TURN (Cloudflare)** — Init reicht deren Creds durch;
+   - self-hosted: **ein winziger coturn co-located mit Init** auf der bestehenden Prod-VM (Variante C, aktueller Plan).
+3. **Creds immer ephemer** (`use-auth-secret`, HMAC, TTL ~1 h) — egal wer hostet, zustandslos, kein Account-System (§8).
+4. **`turns://` (TLS)** statt `turn://` für den Relay-Pfad (Privacy + firewall-freundlich, Port 5349/443).
+
+**Betriebs-Anforderungen coturn (nur bei C/D, self-hosted):**
+- Ports: `3478` (STUN/TURN, UDP+TCP), `5349` (turns/TLS), Relay-Range `49152-65535/udp`.
+- `use-auth-secret` + shared secret (nur Init + coturn), `realm`, `external-ip`.
+- **Bandbreite ist der Kostentreiber** (jeder relayte Stream ~48 kbps × Peers) → genau deshalb nur Fallback, nie Default-Pfad.
+
+---
+
 ## 9. Verbindungs-Transparenz (Pflicht-Anforderung)
 
 Pro Peer ein **Verbindungs-Badge**, abgeleitet aus dem **ICE selected candidate-pair**
@@ -293,7 +332,7 @@ self-signed via `rcgen`/openssl, als PEM ausgeliefert; Rotation später.
 ## 12. Modul-Layout (Vorschlag)
 
 ```
-RDOC-SACompanion/
+RDOC VoiceMesh/
 ├─ apps/
 │  └─ companion/                 # Tauri-App
 │     ├─ src/                    # React UI (kit.css aus RDOC-Suite übernehmen)
@@ -336,7 +375,7 @@ Optional: `protocol`-Crate als Workspace-Member, von Companion **und** Init gete
 
 ## 14. Warum kein LiveKit (Begründung der Existenz)
 
-LiveKit = SFU = Upload-1× + Server-Skalierung für große Räume. SACompanion tauscht **Skalierung
+LiveKit = SFU = Upload-1× + Server-Skalierung für große Räume. VoiceMesh tauscht **Skalierung
 gegen Serverlosigkeit**: kleine Squads bekommen direktes P2P (niedrigere Latenz, beste Privacy,
 kein Media-Server), zahlen dafür mit der ~16er-Decke. Bewusster Trade-off.
 

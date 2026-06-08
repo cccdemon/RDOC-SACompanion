@@ -667,7 +667,7 @@ export default function App() {
           onClick={rotateKey}
           disabled={rotating}
         >
-          {rotating ? "⏳ Rotiere…" : `🔑 Key rotieren · #${keyInfo.gen}`}
+          {rotating ? "⏳ Verschlüssele neu…" : `🔑 Session neu verschlüsseln · #${keyInfo.gen}`}
         </button>
       </div>
 

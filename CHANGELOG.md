@@ -2,6 +2,11 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.16 — 2026-06-08
+
+### Changed
+- Renamed the rekey button to "Session neu verschlüsseln".
+
 ## v0.1.15 — 2026-06-08
 
 ### Fixed

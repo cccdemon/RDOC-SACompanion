@@ -2,6 +2,25 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.11 — 2026-06-08
+
+### Security
+- **Reflected XSS on /j/:code fixed**: the share code is now length-capped + HTML-escaped;
+  added a strict CSP `<meta>` to all server-rendered pages.
+- **CORS restricted** to known origins (own domain + Tauri webview + dev), extendable via
+  `EXTRA_CORS_ORIGINS` — no more `CorsLayer::permissive()`.
+- **Rate-limit IP**: trust `X-Forwarded-For` only when the direct peer is the loopback
+  proxy; otherwise use the real socket IP (via `ConnectInfo`) — no XFF spoofing.
+- **Plain-ws bind hardened**: with `TLS_DISABLE=1` the server binds `127.0.0.1` only
+  unless `ALLOW_PLAIN_PUBLIC_BIND=1`.
+- **DSP IPC validation**: `set_dsp` rejects NaN/inf and clamps all fields at the boundary.
+
+### Added
+- **Low-bandwidth mode** (gear): drops Opus to ~14 kbps + app-level DTX (silence sends no
+  packets). Big win in a full mesh (upload ≈ bitrate × peers). Netbar shows 🐢 when active.
+- **TURN relay-fallback toggle** (gear): off = direct/STUN only, never via a relay
+  (`EngineConfig.relay_enabled`, default on).
+
 ## v0.1.10 — 2026-06-08
 
 ### Added

@@ -3,7 +3,7 @@
 //! decode/mix run on plain std threads (audiopus stays out of tokio).
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -336,10 +336,13 @@ pub fn encode_loop(
     mix: MixMap,
     monitor: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    bitrate: Arc<AtomicU32>, // 0 = Opus auto; else target bits/s (low-bw mode)
+    dtx: Arc<AtomicBool>,    // app-level DTX: don't send silent frames
 ) {
     const NS: usize = DenoiseState::FRAME_SIZE; // 480 = 10ms @ 48k
-    let enc = Encoder::new(SampleRate::Hz48000, Channels::Mono, Application::Voip)
+    let mut enc = Encoder::new(SampleRate::Hz48000, Channels::Mono, Application::Voip)
         .expect("opus encoder");
+    let mut last_br = u32::MAX;
     let mut up = Resampler::new(in_rate, OPUS_SR);
     let mut den = DenoiseState::new();
     let mut dsp = Dsp::new();
@@ -393,8 +396,22 @@ pub fn encode_loop(
                 }
             }
             if transmit.load(Ordering::SeqCst) {
-                if let Ok(n) = enc.encode(&frame[..], &mut encoded[..]) {
-                    let _ = opus_tx.send(Bytes::copy_from_slice(&encoded[..n]));
+                // Live bitrate (low-bandwidth mode).
+                let br = bitrate.load(Ordering::SeqCst);
+                if br != last_br {
+                    let _ = enc.set_bitrate(if br == 0 {
+                        audiopus::Bitrate::Auto
+                    } else {
+                        audiopus::Bitrate::BitsPerSecond(br as i32)
+                    });
+                    last_br = br;
+                }
+                // App-level DTX: skip near-silent frames → no packets during silence.
+                let silent = frame.iter().all(|&s| (s as i32).abs() < 250);
+                if !(dtx.load(Ordering::SeqCst) && silent) {
+                    if let Ok(n) = enc.encode(&frame[..], &mut encoded[..]) {
+                        let _ = opus_tx.send(Bytes::copy_from_slice(&encoded[..n]));
+                    }
                 }
             }
         }

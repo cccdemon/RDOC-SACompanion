@@ -129,6 +129,20 @@ export default function App() {
     }
   });
   const [monitoring, setMonitoring] = useState(false);
+  const [lowBw, setLowBw] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("sa.lowbw") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [relayFb, setRelayFb] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("sa.relayFallback") !== "0"; // default on
+    } catch {
+      return true;
+    }
+  });
   const [update, setUpdate] = useState<{ version: string; notes: string } | null>(null);
   const [showUpdate, setShowUpdate] = useState(true);
   const [pttBinding, setPttBinding] = useState<string>(() => {
@@ -172,6 +186,18 @@ export default function App() {
     setDeaf((d) => {
       const nv = !d;
       invoke("set_master_volume", { volume: nv ? 0 : masterVol / 100 }).catch(() => {});
+      return nv;
+    });
+  };
+  const toggleLowBw = () => {
+    setLowBw((v) => {
+      const nv = !v;
+      try {
+        localStorage.setItem("sa.lowbw", nv ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      invoke("set_low_bandwidth", { on: nv }).catch(() => {});
       return nv;
     });
   };
@@ -293,7 +319,10 @@ export default function App() {
 
   // Push saved DSP settings to the engine once connected.
   useEffect(() => {
-    if (connected) invoke("set_dsp", { cfg: dsp }).catch(() => {});
+    if (connected) {
+      invoke("set_dsp", { cfg: dsp }).catch(() => {});
+      invoke("set_low_bandwidth", { on: lowBw }).catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected]);
   const rebindPtt = () => {
@@ -349,6 +378,18 @@ export default function App() {
       certSha256: null,
       inputDevice: audioCfg.input || null,
       outputDevice: audioCfg.output || null,
+      relayEnabled: relayFb,
+    });
+  };
+  const toggleRelayFb = () => {
+    setRelayFb((v) => {
+      const nv = !v;
+      try {
+        localStorage.setItem("sa.relayFallback", nv ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return nv;
     });
   };
   const createSession = async () => {
@@ -416,6 +457,22 @@ export default function App() {
       </div>
       <div className="sub2" style={{ opacity: 0.7 }}>
         Push-to-Talk: jede Taste oder Maustaste (RAW). Geräteänderung wird beim nächsten Verbinden aktiv.
+      </div>
+
+      <label>🛰 TURN-Relay-Fallback</label>
+      <button className={`btn sm ${relayFb ? "primary" : ""}`} onClick={toggleRelayFb}>
+        {relayFb ? "An (nutzt Relay falls nötig)" : "Aus (nur direkt/STUN)"}
+      </button>
+      <div className="sub2" style={{ opacity: 0.7 }}>
+        Aus = nie über einen Relay; bei striktem NAT ggf. keine Verbindung. Greift beim nächsten Verbinden.
+      </div>
+
+      <label>🐢 Low-Bandwidth-Modus</label>
+      <button className={`btn sm ${lowBw ? "primary" : ""}`} onClick={toggleLowBw}>
+        {lowBw ? "An — ≈14 kbps + Stille-Unterdrückung" : "Aus"}
+      </button>
+      <div className="sub2" style={{ opacity: 0.7 }}>
+        Niedrige Opus-Bitrate + DTX (Stille sendet nichts) für schwache Verbindungen.
       </div>
 
       <label>🎧 Mikrofon-Test</label>
@@ -581,6 +638,7 @@ export default function App() {
         <span>↑ {measured ? "" : "~"}{up} kbps</span>
         <span>↓ {measured ? "" : "~"}{down} kbps</span>
         <span className="netest">({measured ? "gemessen" : "geschätzt"})</span>
+        {lowBw && <span className="lowbw" title="Low-Bandwidth-Modus aktiv">🐢 Low-BW</span>}
         <button
           className="rekey"
           title="Erzeugt für alle Teilnehmer neue Verschlüsselungs-Keys (DTLS-SRTP re-handshake)"

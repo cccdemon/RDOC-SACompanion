@@ -103,8 +103,10 @@ async fn connect(
     cert_sha256: Option<String>,
     input_device: Option<String>,
     output_device: Option<String>,
+    relay_enabled: Option<bool>,
 ) -> Result<(), String> {
     // ── Rust-side validation (never trust the webview) ──────────────────────
+    let relay_enabled = relay_enabled.unwrap_or(true);
     let server = server.trim().to_string();
     if !companion_core::signaling::server_url_ok(&server) {
         return Err("invalid server URL — use wss:// or loopback ws://".into());
@@ -140,7 +142,7 @@ async fn connect(
     let output_device = clean_dev(output_device)?;
 
     let engine = start(
-        EngineConfig { server, room, user_id, name, token, cert_sha256, input_device, output_device },
+        EngineConfig { server, room, user_id, name, token, cert_sha256, input_device, output_device, relay_enabled },
         make_sink(&app),
     )
     .await
@@ -258,7 +260,14 @@ fn reconnect_session(state: State<AppState>) {
 }
 
 #[tauri::command]
-fn set_dsp(state: State<AppState>, cfg: companion_core::audio::DspConfig) {
+fn set_dsp(state: State<AppState>, mut cfg: companion_core::audio::DspConfig) {
+    // Normalize at the IPC boundary: reject NaN/inf, clamp to sane ranges.
+    let norm = |v: f32, lo: f32, hi: f32, dflt: f32| if v.is_finite() { v.clamp(lo, hi) } else { dflt };
+    cfg.gate_threshold = norm(cfg.gate_threshold, 0.0, 0.5, 0.015);
+    cfg.comp_threshold = norm(cfg.comp_threshold, 0.01, 1.0, 0.15);
+    cfg.comp_ratio = norm(cfg.comp_ratio, 1.0, 20.0, 3.0);
+    cfg.comp_makeup = norm(cfg.comp_makeup, 0.1, 4.0, 1.4);
+    cfg.limiter_ceiling = norm(cfg.limiter_ceiling, 0.05, 1.0, 0.97);
     if let Some(e) = state.engine.lock().unwrap().as_ref() {
         e.set_dsp(cfg);
     }
@@ -268,6 +277,13 @@ fn set_dsp(state: State<AppState>, cfg: companion_core::audio::DspConfig) {
 fn set_monitor(state: State<AppState>, on: bool) {
     if let Some(e) = state.engine.lock().unwrap().as_ref() {
         e.set_monitor(on);
+    }
+}
+
+#[tauri::command]
+fn set_low_bandwidth(state: State<AppState>, on: bool) {
+    if let Some(e) = state.engine.lock().unwrap().as_ref() {
+        e.set_low_bandwidth(on);
     }
 }
 
@@ -310,6 +326,7 @@ fn main() {
             reconnect_session,
             set_dsp,
             set_monitor,
+            set_low_bandwidth,
             disconnect,
             open_download,
             set_ptt_binding,

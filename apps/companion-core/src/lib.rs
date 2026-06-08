@@ -8,7 +8,7 @@ pub mod serverless;
 pub mod signaling;
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -73,6 +73,9 @@ pub struct EngineConfig {
     pub cert_sha256: Option<String>,
     pub input_device: Option<String>,
     pub output_device: Option<String>,
+    /// Allow TURN relay fallback when the server offers creds. If false, only
+    /// direct/STUN paths are used (no media via a relay).
+    pub relay_enabled: bool,
 }
 
 enum Cmd {
@@ -90,6 +93,8 @@ pub struct Engine {
     dsp: Arc<Mutex<audio::DspConfig>>,
     monitor: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    bitrate: Arc<AtomicU32>,
+    dtx: Arc<AtomicBool>,
 }
 impl Drop for Engine {
     fn drop(&mut self) {
@@ -127,6 +132,12 @@ impl Engine {
     pub fn set_monitor(&self, on: bool) {
         self.monitor.store(on, Ordering::SeqCst);
     }
+    /// Low-bandwidth mode: drop Opus to ~14 kbps + app-level DTX (silence = no
+    /// packets). Off = Opus auto bitrate, DTX off.
+    pub fn set_low_bandwidth(&self, on: bool) {
+        self.bitrate.store(if on { 14_000 } else { 0 }, Ordering::SeqCst);
+        self.dtx.store(on, Ordering::SeqCst);
+    }
     /// Overall output volume (0.0 mute … 1.0 normal … 2.0 +6 dB). Live.
     pub fn set_master_volume(&self, v: f32) {
         self.gains.set_master(v);
@@ -160,6 +171,8 @@ pub(crate) fn setup_audio(
     Arc<Mutex<audio::DspConfig>>,
     Arc<AtomicBool>, // mic self-check (monitor) toggle
     Arc<AtomicBool>, // shutdown flag for the audio threads
+    Arc<AtomicU32>,  // encoder bitrate (0 = auto; low-bw mode)
+    Arc<AtomicBool>, // app-level DTX toggle
 )> {
     let cap: Buf = Arc::new(Mutex::new(VecDeque::new()));
     let play: Buf = Arc::new(Mutex::new(VecDeque::new()));
@@ -169,6 +182,8 @@ pub(crate) fn setup_audio(
     let dsp_cfg = Arc::new(Mutex::new(audio::DspConfig::default()));
     let monitor = Arc::new(AtomicBool::new(false));
     let stop = Arc::new(AtomicBool::new(false));
+    let bitrate = Arc::new(AtomicU32::new(0)); // 0 = Opus auto
+    let dtx = Arc::new(AtomicBool::new(false));
 
     let (rate_tx, rate_rx) = std::sync::mpsc::channel::<(u32, u32)>();
     {
@@ -180,10 +195,12 @@ pub(crate) fn setup_audio(
     let (opus_tx, opus_rx) = mpsc::unbounded_channel::<Bytes>();
     let (decode_tx, decode_rx) = mpsc::unbounded_channel::<(String, Bytes)>();
     {
-        let (cap, transmit, dsp_cfg, mix, monitor, stop) =
-            (cap.clone(), transmit.clone(), dsp_cfg.clone(), mix.clone(), monitor.clone(), stop.clone());
+        let (cap, transmit, dsp_cfg, mix, monitor, stop, bitrate, dtx) = (
+            cap.clone(), transmit.clone(), dsp_cfg.clone(), mix.clone(),
+            monitor.clone(), stop.clone(), bitrate.clone(), dtx.clone(),
+        );
         std::thread::spawn(move || {
-            audio::encode_loop(cap, in_rate, transmit, opus_tx, dsp_cfg, mix, monitor, stop)
+            audio::encode_loop(cap, in_rate, transmit, opus_tx, dsp_cfg, mix, monitor, stop, bitrate, dtx)
         });
     }
     {
@@ -195,7 +212,7 @@ pub(crate) fn setup_audio(
         std::thread::spawn(move || audio::mixer_loop(mix, play, out_rate, gains, stop));
     }
 
-    Ok((transmit, opus_rx, decode_tx, gains, dsp_cfg, monitor, stop))
+    Ok((transmit, opus_rx, decode_tx, gains, dsp_cfg, monitor, stop, bitrate, dtx))
 }
 
 struct Member {
@@ -238,7 +255,7 @@ fn emit_roster(
 pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let (transmit, mut opus_rx, decode_tx, gains, dsp_cfg, monitor, stop) =
+    let (transmit, mut opus_rx, decode_tx, gains, dsp_cfg, monitor, stop, bitrate, dtx) =
         setup_audio(cfg.input_device.clone(), cfg.output_device.clone())?;
 
     let api = Arc::new(build_api()?);
@@ -284,6 +301,7 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
 
     let me_id = cfg.user_id.clone();
     let me_name = cfg.name.clone();
+    let relay_enabled = cfg.relay_enabled;
     // Retained so we can reconnect signaling (resume session) keeping the mesh.
     let rc_server = cfg.server.clone();
     let rc_cert = cfg.cert_sha256.clone();
@@ -364,7 +382,13 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                             key_gen = key_gen.saturating_add(1);
                             sink(UiEvent::Rekeyed { generation: key_gen, by });
                         }
-                        ServerMsg::Turn(t) => { mesh.add_turn(t.urls, t.username, t.credential); }
+                        ServerMsg::Turn(t) => {
+                            if relay_enabled {
+                                mesh.add_turn(t.urls, t.username, t.credential);
+                            } else {
+                                sink(UiEvent::Log { text: "TURN-Relay angeboten, aber deaktiviert (nur direkt/STUN).".into() });
+                            }
+                        }
                         ServerMsg::Warn { size, cap } => { sink(UiEvent::Log { text: format!("Room {size}/{cap} — Audioqualität kann leiden") }); }
                         ServerMsg::RoomFull { cap } => { sink(UiEvent::Log { text: format!("Room voll @ {cap}") }); break; }
                         ServerMsg::Error { code, message } => { sink(UiEvent::Log { text: format!("{code}: {message}") }); }
@@ -439,5 +463,5 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
         }
     });
 
-    Ok(Engine { cmd_tx, gains, dsp: dsp_cfg, monitor, stop })
+    Ok(Engine { cmd_tx, gains, dsp: dsp_cfg, monitor, stop, bitrate, dtx })
 }

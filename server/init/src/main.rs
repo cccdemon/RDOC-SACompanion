@@ -17,11 +17,12 @@ mod tls;
 mod turn;
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{DefaultBodyLimit, Path, State};
-use axum::http::StatusCode;
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -64,6 +65,18 @@ fn len_ok(s: &str, max: usize) -> bool {
     !s.is_empty() && s.len() <= max
 }
 
+/// Minimal HTML-escape for any value reflected into server-rendered HTML.
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
+/// CSP meta for the server-rendered pages (no scripts; inline styles + the logo).
+const HTML_CSP: &str = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'\">";
+
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -100,14 +113,48 @@ impl RateLimiter {
 
 /// Best-effort client IP: first hop of X-Forwarded-For (set by our reverse
 /// proxy), else a constant bucket. Good enough for coarse abuse throttling.
-fn client_ip(headers: &axum::http::HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".into())
+/// Real client IP for rate-limiting. X-Forwarded-For is only trusted when the
+/// direct peer is our loopback reverse proxy; otherwise the socket peer is used
+/// (so a directly-reachable client can't spoof XFF to dodge/forge limits).
+fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> String {
+    if peer.ip().is_loopback() {
+        if let Some(first) = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            return first.to_string();
+        }
+    }
+    peer.ip().to_string()
+}
+
+/// CORS limited to known origins (own domain + Tauri webview + dev), extendable
+/// via EXTRA_CORS_ORIGINS for a future browser participant.
+fn build_cors() -> CorsLayer {
+    let mut origins: Vec<HeaderValue> = [
+        "https://squadlink.raumdock.org",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "tauri://localhost",
+        "http://localhost:1420",
+    ]
+    .into_iter()
+    .filter_map(|o| o.parse().ok())
+    .collect();
+    if let Ok(extra) = std::env::var("EXTRA_CORS_ORIGINS") {
+        for o in extra.split(',') {
+            if let Ok(v) = o.trim().parse() {
+                origins.push(v);
+            }
+        }
+    }
+    CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([axum::http::header::CONTENT_TYPE])
 }
 
 struct PeerHandle {
@@ -189,17 +236,24 @@ async fn main() -> anyhow::Result<()> {
         .route("/session/:code/join", post(join_session))
         .route("/j/:code", get(landing))
         .layer(DefaultBodyLimit::max(MAX_REST_BODY))
-        .layer(CorsLayer::permissive())
+        .layer(build_cors())
         .with_state(state);
 
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
 
-    // TLS by default (wss). TLS_DISABLE=1 → plain ws, loopback dev only.
+    // TLS by default (wss). TLS_DISABLE=1 → plain ws (must sit behind a TLS proxy);
+    // bind loopback only unless ALLOW_PLAIN_PUBLIC_BIND=1, so a misconfig can't
+    // expose plain ws to the network.
     if std::env::var("TLS_DISABLE").is_ok() {
-        tracing::warn!("TLS_DISABLE set — serving PLAIN ws (loopback dev only)");
-        let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
-        tracing::info!("InitConnection listening (ws) on :{port} (warn@{WARN_CAP} hard@{HARD_CAP})");
-        axum::serve(listener, app).await?;
+        let bind_ip = if std::env::var("ALLOW_PLAIN_PUBLIC_BIND").is_ok() {
+            "0.0.0.0"
+        } else {
+            "127.0.0.1"
+        };
+        tracing::warn!("TLS_DISABLE set — serving PLAIN ws on {bind_ip}:{port} (proxy expected)");
+        let listener = tokio::net::TcpListener::bind((bind_ip, port)).await?;
+        tracing::info!("InitConnection listening (ws) on {bind_ip}:{port} (warn@{WARN_CAP} hard@{HARD_CAP})");
+        axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
         return Ok(());
     }
 
@@ -217,7 +271,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     axum_server::bind_rustls(addr, rustls_config)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
     Ok(())
 }
@@ -231,9 +285,10 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) ->
 /// Host creates a session → random room + token + 6-digit PIN + share code.
 async fn create_session(
     State(state): State<Arc<AppState>>,
-    headers: axum::http::HeaderMap,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> Response {
-    if !state.rate.allow(&client_ip(&headers), RL_CREATE_MAX, RL_WINDOW) {
+    if !state.rate.allow(&client_ip(&headers, peer), RL_CREATE_MAX, RL_WINDOW) {
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "rate_limited" }))).into_response();
     }
     let (code, pin, room, token) = state.sessions.create(|r| state.auth.token_for(r));
@@ -253,11 +308,12 @@ async fn create_session(
 /// Mate resolves a code with the PIN (rate-limited) → room + token.
 async fn join_session(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path(code): Path<String>,
-    headers: axum::http::HeaderMap,
+    headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Response {
-    if !state.rate.allow(&client_ip(&headers), RL_JOIN_MAX, RL_WINDOW) {
+    if !state.rate.allow(&client_ip(&headers, peer), RL_JOIN_MAX, RL_WINDOW) {
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "rate_limited" }))).into_response();
     }
     let pin = body.get("pin").and_then(|v| v.as_str()).unwrap_or("");
@@ -284,8 +340,10 @@ async fn join_session(
 /// Human landing page for a share link: shows the code + download + instructions.
 async fn landing(Path(code): Path<String>) -> Html<String> {
     let base = public_base();
+    // Reflected value: cap length + HTML-escape (defends against XSS via the path).
+    let code = esc(&code.chars().take(32).collect::<String>());
     Html(format!(
-        r#"<!doctype html><html lang="de"><head><meta charset="utf-8">
+        r#"<!doctype html><html lang="de"><head><meta charset="utf-8">{HTML_CSP}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RDOC SquadLink Lite — Session beitreten</title>
 <style>body{{font-family:system-ui,sans-serif;background:#020814;color:#e2e8f0;max-width:34rem;margin:6vh auto;padding:0 1.2rem;line-height:1.6}}
@@ -343,7 +401,7 @@ fn footer_html(base: &str) -> String {
 fn shell(title: &str, body: &str) -> Html<String> {
     let base = public_base();
     Html(format!(
-        "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
+        "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">{HTML_CSP}\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <title>{title} — RDOC SquadLink Lite</title><link rel=\"icon\" href=\"{base}/download/sl-logo.png\">{css}</head><body>\
 <header class=\"top\"><img src=\"{base}/download/sl-logo.png\" alt=\"SquadLink Lite\" onerror=\"this.onerror=null;this.src='{logo}'\"><a href=\"/\">RDOC SquadLink Lite</a></header>\

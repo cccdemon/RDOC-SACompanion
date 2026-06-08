@@ -202,3 +202,6 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 .updhead .x { background: none; border: none; color: #9aa3ad; font-size: 1.1rem; cursor: pointer; }
 .updnotes { max-height: 11rem; overflow: auto; background: rgba(0,0,0,.3); border-radius: 6px; padding: .5rem .6rem; margin: .5rem 0; font-size: .78rem; white-space: pre-wrap; line-height: 1.4; }
 .updact { display: flex; gap: .5rem; }
+
+/* Low-bandwidth indicator */
+.netbar .lowbw { color: #9be7a0; font-size: .8rem; }

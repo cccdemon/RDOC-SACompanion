@@ -33,6 +33,7 @@ async fn main() -> Result<()> {
         cert_sha256: std::env::var("CERT_SHA256").ok(),
         input_device: std::env::var("IN_DEVICE").ok(),
         output_device: std::env::var("OUT_DEVICE").ok(),
+        relay_enabled: std::env::var("RELAY_DISABLED").is_err(),
     };
 
     let sink: Sink = Arc::new(|ev| match ev {

@@ -98,7 +98,7 @@ pub fn home(l: Lang, base: &str) -> (&'static str, String) {
             lc = l.code(),
         )
     };
-    match l {
+    let (title, mut body): (&'static str, String) = match l {
         Lang::En => (
             "What is this?",
             format!(
@@ -189,7 +189,31 @@ pub fn home(l: Lang, base: &str) -> (&'static str, String) {
                 links = links("raumdock.org", "RDOC Fleet Manager", "Code sur GitHub", "Mentions légales", "Confidentialité", "Licence")
             ),
         ),
-    }
+    };
+    body.push_str(&credits(l));
+    (title, body)
+}
+
+/// Tester + author credits, appended to the home page.
+fn credits(l: Lang) -> String {
+    let (tested, concept, ai) = match l {
+        Lang::En => ("Tested by", "Concept &amp; programming by", "Yes, AI was involved."),
+        Lang::De => ("Getestet von", "Konzept &amp; Programmierung von", "Ja, KI war beteiligt."),
+        Lang::It => ("Testato da", "Ideazione e programmazione di", "Sì, è stata coinvolta l'IA."),
+        Lang::Es => ("Probado por", "Concepto y programación de", "Sí, hubo IA involucrada."),
+        Lang::Fr => ("Testé par", "Conception et programmation par", "Oui, l'IA a participé."),
+    };
+    format!(
+        r#"<h2>{tested}</h2>
+<p class="links">
+<a href="https://twitch.tv/smorxel">twitch.tv/smorxel</a>
+<a href="https://twitch.tv/JerichoRamirez">twitch.tv/JerichoRamirez</a>
+<a href="https://twitch.tv/JustCallMeDeimos">twitch.tv/JustCallMeDeimos</a>
+<a href="https://twitch.tv/stormp00per89">twitch.tv/stormp00per89</a>
+<a href="https://twitch.tv/x_jazzz_x">twitch.tv/x_jazzz_x</a>
+</p>
+<p class="muted">{concept} JustCallMeDeimos (Claude Code &amp; Codex for crosstesting). {ai}</p>"#
+    )
 }
 
 pub fn privacy(l: Lang) -> (&'static str, String) {

@@ -6,15 +6,24 @@ set -euo pipefail
 
 REPO="cccdemon/RDOC-SquadLinkLite"
 DEST="/opt/RDOC-Suite/downloads/squadlink"
-API="https://api.github.com/repos/${REPO}/releases?per_page=10"
+# per_page=1 → ONLY the newest release, so we never grab an older release's asset
+# if the newest one's assets aren't attached yet.
+API="https://api.github.com/repos/${REPO}/releases?per_page=1"
 # Robust against transient GitHub/CDN 5xx right after a release is published.
 RETRY="--retry 6 --retry-delay 4 --retry-all-errors"
 
 mkdir -p "$DEST"
 
-# Newest release is first in the array; grab its asset URLs (incl. prereleases).
-urls="$(curl -fsSL $RETRY -H 'Accept: application/vnd.github+json' "$API" \
-  | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4 || true)"
+# The newest release's asset URLs. Retry because tauri-action creates the release
+# a moment before it finishes uploading the installer (publish→attach race).
+urls=""
+for attempt in 1 2 3 4 5 6 7 8; do
+  urls="$(curl -fsSL $RETRY -H 'Accept: application/vnd.github+json' "$API" \
+    | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4 || true)"
+  printf '%s\n' "$urls" | grep -qiE 'setup\.exe$' && break
+  echo "newest release has no installer asset yet (attempt $attempt) — waiting"
+  sleep 10
+done
 [ -n "$urls" ] || { echo "no releases yet"; exit 0; }
 
 fetch() {

@@ -30,3 +30,15 @@ Trotzdem ausführen").
 
 Lokaler Dev-Build (optional, braucht Rust + Node + pnpm):
 `cd apps/companion && pnpm install && pnpm tauri dev`
+
+## License
+
+© head87x & justcallmedeimos — **PolyForm Noncommercial License 1.0.0** (see [LICENSE](LICENSE)).
+
+Free for any **non-commercial** purpose (private, community, education, research).
+
+**Commercial use requires a separate commercial license.** Commercial use includes selling,
+sublicensing, hosting as a paid service, integrating into commercial products, or using the
+software in revenue-generating activities.
+
+For commercial licensing inquiries: **commercialusage@raumdock.org**

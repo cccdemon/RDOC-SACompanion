@@ -364,12 +364,17 @@ async fn license_page() -> Html<String> {
 <p>RDOC SquadLink Lite steht unter der <b>PolyForm Noncommercial License 1.0.0</b>.</p>
 <h2>Kurz gesagt</h2>
 <ul>
-<li>✅ <b>Nutzen, kopieren, ändern, weitergeben</b> — für <b>jeden nicht-kommerziellen Zweck</b>
+<li>Nutzen, kopieren, ändern, weitergeben — für jeden nicht-kommerziellen Zweck
 (privat, Community, Bildung, Forschung).</li>
-<li>🚫 <b>Keine kommerzielle Nutzung</b> ohne gesonderte Erlaubnis.</li>
-<li>📝 Lizenz- und Urhebervermerke beibehalten.</li>
-<li>⚠️ Ohne Gewähr / ohne Haftung.</li>
+<li>Keine kommerzielle Nutzung ohne gesonderte Lizenz.</li>
+<li>Lizenz- und Urhebervermerke beibehalten.</li>
+<li>Ohne Gewähr / ohne Haftung.</li>
 </ul>
+<h2>Kommerzielle Nutzung</h2>
+<p>Kommerzielle Nutzung erfordert eine separate kommerzielle Lizenz. Dazu zählen u.&nbsp;a.
+Verkauf, Unterlizenzierung, Betrieb als bezahlter Dienst, Integration in kommerzielle Produkte
+oder Nutzung in umsatzgenerierenden Aktivitäten.</p>
+<p>Anfragen: <a href="mailto:commercialusage@raumdock.org">commercialusage@raumdock.org</a></p>
 <p>Dies ist eine Zusammenfassung — verbindlich ist der vollständige Lizenztext:</p>
 <p><a class="dl" href="{GITHUB_URL}/blob/main/LICENSE">Vollständige Lizenz (LICENSE) ansehen</a></p>
 <p class="muted">© head87x &amp; justcallmedeimos. PolyForm Noncommercial License 1.0.0 — siehe polyformproject.org.</p>"#

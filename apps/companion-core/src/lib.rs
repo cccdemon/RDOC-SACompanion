@@ -4,6 +4,7 @@
 
 pub mod audio;
 pub mod mesh;
+pub mod selfcheck;
 pub mod serverless;
 pub mod signaling;
 

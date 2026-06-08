@@ -129,6 +129,8 @@ export default function App() {
     }
   });
   const [monitoring, setMonitoring] = useState(false);
+  const [netCheck, setNetCheck] = useState<{ signaling: boolean; can_send: boolean; can_receive: boolean; stun: boolean } | null>(null);
+  const [checking, setChecking] = useState(false);
   const [lowBw, setLowBw] = useState<boolean>(() => {
     try {
       return localStorage.getItem("sa.lowbw") === "1";
@@ -200,6 +202,16 @@ export default function App() {
       invoke("set_low_bandwidth", { on: nv }).catch(() => {});
       return nv;
     });
+  };
+  const runNetCheck = () => {
+    setChecking(true);
+    setNetCheck(null);
+    invoke<{ signaling: boolean; can_send: boolean; can_receive: boolean; stun: boolean }>("net_selfcheck", {
+      server: "wss://squadlink.raumdock.org/ws",
+    })
+      .then((r) => setNetCheck(r))
+      .catch(() => setNetCheck(null))
+      .finally(() => setChecking(false));
   };
   const toggleMonitor = () => {
     setMonitoring((m) => {
@@ -406,6 +418,7 @@ export default function App() {
   const createSession = async () => {
     setConnecting(true);
     setLog("");
+    setChat([]);
     try {
       const r = await fetch(`${SESSION_BASE}/session`, { method: "POST" });
       if (!r.ok) throw new Error("Server " + r.status);
@@ -420,6 +433,7 @@ export default function App() {
   const joinSession = async () => {
     setConnecting(true);
     setLog("");
+    setChat([]);
     try {
       const code = parseCode(joinInput);
       const base = baseFromInput(joinInput);
@@ -495,6 +509,19 @@ export default function App() {
       <div className="sub2" style={{ opacity: 0.7 }}>
         Niedrige Opus-Bitrate + DTX (Stille sendet nichts) für schwache Verbindungen.
       </div>
+
+      <label>🛰 Netzwerk-Selbsttest</label>
+      <button className="btn sm" onClick={runNetCheck} disabled={checking}>
+        {checking ? "Teste… (bis ~10 s)" : "Test starten"}
+      </button>
+      {netCheck && (
+        <div className="netcheck">
+          <div>Signaling-Server: {netCheck.signaling ? "✅ ja" : "❌ nein"}</div>
+          <div>Kann senden: {netCheck.can_send ? "✅ ja" : "❌ nein"}</div>
+          <div>Kann empfangen: {netCheck.can_receive ? "✅ ja" : "❌ nein"}</div>
+          <div>Internet / STUN: {netCheck.stun ? "✅ ja" : "❌ nein"}</div>
+        </div>
+      )}
 
       <label>🎧 Mikrofon-Test</label>
       <button className={`btn sm ${monitoring ? "primary" : ""}`} onClick={toggleMonitor}>

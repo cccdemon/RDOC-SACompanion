@@ -295,6 +295,17 @@ fn disconnect(state: State<AppState>) {
     *state.serverless.lock().unwrap() = None;
 }
 
+/// Network self-check (pre-session): can we send/receive WebRTC data, is STUN
+/// reachable, is the signaling server reachable.
+#[tauri::command]
+async fn net_selfcheck(server: String) -> Result<companion_core::selfcheck::SelfCheck, String> {
+    let server = server.trim().to_string();
+    if !companion_core::signaling::server_url_ok(&server) {
+        return Err("invalid server URL".into());
+    }
+    Ok(companion_core::selfcheck::run(&server, None).await)
+}
+
 /// Open the public download page in the system browser (for the update prompt).
 #[tauri::command]
 fn open_download() {
@@ -328,6 +339,7 @@ fn main() {
             set_monitor,
             set_low_bandwidth,
             disconnect,
+            net_selfcheck,
             open_download,
             set_ptt_binding,
             start_ptt_capture

@@ -2,6 +2,16 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.17 — 2026-06-08
+
+### Added
+- **Network self-check** (gear): tests the WebRTC data path via a local two-PeerConnection
+  DataChannel echo and reports — Signaling server reachable, Kann senden, Kann empfangen,
+  Internet/STUN (server-reflexive candidate) — each yes/no.
+
+### Fixed
+- Chat is now cleared when starting/joining a new session.
+
 ## v0.1.16 — 2026-06-08
 
 ### Changed

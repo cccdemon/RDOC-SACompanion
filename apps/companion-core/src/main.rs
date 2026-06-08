@@ -57,6 +57,7 @@ async fn main() -> Result<()> {
             println!("[net peers={peers} up={up_kbps}kbps down={down_kbps}kbps]")
         }
         UiEvent::Rekeyed { generation, by } => println!("[rekey #{generation} by {by}]"),
+        UiEvent::Signaling { up } => println!("[signaling {}]", if up { "up" } else { "down" }),
     });
 
     let engine = Arc::new(start(cfg, sink).await?);

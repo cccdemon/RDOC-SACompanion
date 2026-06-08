@@ -250,6 +250,13 @@ fn rotate_key(state: State<AppState>) {
     }
 }
 
+#[tauri::command]
+fn reconnect_session(state: State<AppState>) {
+    if let Some(e) = state.engine.lock().unwrap().as_ref() {
+        e.reconnect();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState { engine: Mutex::new(None), serverless: Mutex::new(None) })
@@ -270,6 +277,7 @@ fn main() {
             set_peer_volume,
             list_audio_devices,
             rotate_key,
+            reconnect_session,
             set_ptt_binding,
             start_ptt_capture
         ])

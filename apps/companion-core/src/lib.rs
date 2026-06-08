@@ -51,6 +51,9 @@ pub enum UiEvent {
     Net { peers: usize, up_kbps: u32, down_kbps: u32 },
     /// Encryption keys rotated: fresh DTLS-SRTP keys negotiated across the mesh.
     Rekeyed { generation: u32, by: String },
+    /// Signaling link up/down. P2P audio is independent and keeps running while
+    /// down; `up:false` should offer a "resume session" action.
+    Signaling { up: bool },
 }
 
 pub type Sink = Arc<dyn Fn(UiEvent) + Send + Sync>;
@@ -77,6 +80,7 @@ enum Cmd {
     SetTx(bool),
     Chat(String),
     Rekey,
+    Reconnect,
 }
 
 /// Handle to the running engine; methods are non-blocking.
@@ -99,6 +103,11 @@ impl Engine {
     /// re-handshake so all links get fresh keys.
     pub fn rotate_key(&self) {
         let _ = self.cmd_tx.send(Cmd::Rekey);
+    }
+    /// Resume a dropped signaling link (reconnect + re-join) without tearing
+    /// down the live P2P mesh.
+    pub fn reconnect(&self) {
+        let _ = self.cmd_tx.send(Cmd::Reconnect);
     }
     /// Overall output volume (0.0 mute … 1.0 normal … 2.0 +6 dB). Live.
     pub fn set_master_volume(&self, v: f32) {
@@ -239,15 +248,27 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
     sink(UiEvent::Status { connected: true, transmitting: false });
 
     let (mesh_tx, mut mesh_rx) = mpsc::unbounded_channel::<MeshEvent>();
-    let mut mesh = Mesh::new(api, local, cfg.user_id.clone(), out.clone(), decode_tx, mesh_tx);
+    // Uplink: the mesh sends ClientMsg here; the loop forwards to the CURRENT
+    // signaling connection, so the mesh survives a signaling reconnect.
+    let (up_tx, mut up_rx) = mpsc::unbounded_channel::<ClientMsg>();
+    let mut mesh = Mesh::new(api, local, cfg.user_id.clone(), up_tx, decode_tx, mesh_tx);
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<Cmd>();
 
     let me_id = cfg.user_id.clone();
     let me_name = cfg.name.clone();
+    // Retained so we can reconnect signaling (resume session) keeping the mesh.
+    let rc_server = cfg.server.clone();
+    let rc_cert = cfg.cert_sha256.clone();
+    let rc_room = cfg.room.clone();
+    let rc_token = cfg.token.clone();
+    let rc_user = cfg.user_id.clone();
+    let rc_name = cfg.name.clone();
     tokio::spawn(async move {
         let mut members: HashMap<String, Member> = HashMap::new();
         let mut key_gen: u32 = 1; // generation #1 = the initial DTLS-SRTP keys
+        let mut cur_in = Some(incoming);
+        let mut cur_out = Some(out);
         let mut net_iv = tokio::time::interval(Duration::from_secs(2));
         let mut last_bytes = (0u64, 0u64);
         let mut last_inst = std::time::Instant::now();
@@ -269,10 +290,24 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                         sink(UiEvent::Net { peers: members.len(), up_kbps, down_kbps });
                     }
                 }
-                msg = incoming.recv() => {
+                // Forward mesh-originated signaling to the current connection.
+                Some(up) = up_rx.recv() => {
+                    if let Some(o) = &cur_out { let _ = o.send(up); }
+                }
+                msg = async {
+                    match cur_in.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
                     let Some(msg) = msg else {
-                        sink(UiEvent::Status { connected: false, transmitting: transmit.load(Ordering::SeqCst) });
-                        break;
+                        // Signaling dropped, but the P2P mesh (audio/chat) is
+                        // independent and keeps running. Offer a resume.
+                        cur_in = None;
+                        cur_out = None;
+                        sink(UiEvent::Signaling { up: false });
+                        sink(UiEvent::Log { text: "Signaling getrennt - P2P laeuft weiter. Session wiederaufnehmen zum Neuverbinden.".into() });
+                        continue;
                     };
                     match msg {
                         ServerMsg::Roster { peers } => {
@@ -327,14 +362,14 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                         Some(Cmd::ToggleTx) => {
                             let n = !transmit.load(Ordering::SeqCst);
                             transmit.store(n, Ordering::SeqCst);
-                            let _ = out.send(ClientMsg::Ptt { active: n });
+                            if let Some(o) = &cur_out { let _ = o.send(ClientMsg::Ptt { active: n }); }
                             sink(UiEvent::Status { connected: true, transmitting: n });
                             emit_roster(&sink, &members, &me_id, &me_name, n);
                         }
                         Some(Cmd::SetTx(on)) => {
                             if transmit.load(Ordering::SeqCst) != on {
                                 transmit.store(on, Ordering::SeqCst);
-                                let _ = out.send(ClientMsg::Ptt { active: on });
+                                if let Some(o) = &cur_out { let _ = o.send(ClientMsg::Ptt { active: on }); }
                                 sink(UiEvent::Status { connected: true, transmitting: on });
                                 emit_roster(&sink, &members, &me_id, &me_name, on);
                             }
@@ -345,9 +380,32 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                         }
                         Some(Cmd::Rekey) => {
                             // Broadcast → everyone (incl. us) rekeys on the echoed Rekey.
-                            let _ = out.send(ClientMsg::Rekey);
+                            if let Some(o) = &cur_out { let _ = o.send(ClientMsg::Rekey); }
                         }
-                        None => break,
+                        Some(Cmd::Reconnect) => {
+                            match signaling::connect(&rc_server, rc_cert.as_deref()).await {
+                                Ok(sig2) => {
+                                    let o2 = sig2.out.clone();
+                                    let _ = o2.send(ClientMsg::Join {
+                                        room: rc_room.clone(),
+                                        user_id: rc_user.clone(),
+                                        name: rc_name.clone(),
+                                        token: rc_token.clone(),
+                                    });
+                                    cur_out = Some(o2);
+                                    cur_in = Some(sig2.incoming);
+                                    sink(UiEvent::Signaling { up: true });
+                                    sink(UiEvent::Log { text: "Signaling wiederverbunden.".into() });
+                                }
+                                Err(e) => {
+                                    sink(UiEvent::Log { text: format!("Wiederverbinden fehlgeschlagen: {e}") });
+                                }
+                            }
+                        }
+                        None => {
+                            sink(UiEvent::Status { connected: false, transmitting: false });
+                            break;
+                        }
                     }
                 }
             }

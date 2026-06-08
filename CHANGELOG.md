@@ -2,6 +2,22 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.8 — 2026-06-08
+
+### Fixed
+- **Signaling drop no longer ends the session.** The WS signaling link is now
+  decoupled from the P2P mesh: if it drops (e.g. server restart), audio/chat keep
+  running and the UI shows a "Signaling getrennt" banner instead of going
+  disconnected. Engine keeps the mesh alive via an internal uplink channel.
+
+### Added
+- **"Session wiederaufnehmen"** button — reconnects signaling + re-joins the room
+  without tearing down the live mesh (`reconnect_session` / `Cmd::Reconnect`,
+  `UiEvent::Signaling`).
+- **Self-mute mic** (🎙️) — stop sending while still hearing everyone (gates PTT).
+- **Deafen / Ton aus** (🔊) — mute all output without losing the volume value.
+- **Explicit toggle-transmit button** next to push-to-talk.
+
 ## v0.1.7 — 2026-06-08
 
 ### Fixed

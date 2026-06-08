@@ -29,7 +29,8 @@ type UiEvent =
   | { type: "status"; connected: boolean; transmitting: boolean }
   | { type: "log"; text: string }
   | { type: "net"; peers: number; up_kbps: number; down_kbps: number }
-  | { type: "rekeyed"; generation: number; by: string };
+  | { type: "rekeyed"; generation: number; by: string }
+  | { type: "signaling"; up: boolean };
 
 export default function App() {
   const [connected, setConnected] = useState(false);
@@ -72,6 +73,11 @@ export default function App() {
   const [net, setNet] = useState<{ peers: number; up: number; down: number } | null>(null);
   const [keyInfo, setKeyInfo] = useState<{ gen: number; at: number }>({ gen: 1, at: 0 });
   const [rotating, setRotating] = useState(false);
+  const [sigUp, setSigUp] = useState(true);
+  const [resuming, setResuming] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
+  const micMutedRef = useRef(false);
+  const [deaf, setDeaf] = useState(false);
   const [pttBinding, setPttBinding] = useState<string>(() => {
     try {
       return localStorage.getItem("sa.ptt") || "F8";
@@ -97,7 +103,24 @@ export default function App() {
   };
   const onMaster = (v: number) => {
     setMasterVol(v);
-    invoke("set_master_volume", { volume: v / 100 }).catch(() => {});
+    invoke("set_master_volume", { volume: deaf ? 0 : v / 100 }).catch(() => {});
+  };
+  // Self-mute mic: stop sending now + gate PTT (I still hear everyone).
+  const toggleMic = () => {
+    setMicMuted((m) => {
+      const nv = !m;
+      micMutedRef.current = nv;
+      if (nv) invoke("set_transmit", { on: false }).catch(() => {});
+      return nv;
+    });
+  };
+  // Deafen: mute all output without losing the slider value.
+  const toggleDeaf = () => {
+    setDeaf((d) => {
+      const nv = !d;
+      invoke("set_master_volume", { volume: nv ? 0 : masterVol / 100 }).catch(() => {});
+      return nv;
+    });
   };
   const onPeerVol = (userId: string, v: number) => {
     setPeerVol((m) => ({ ...m, [userId]: v }));
@@ -112,13 +135,19 @@ export default function App() {
       else if (p.type === "status") {
         setConnected(p.connected);
         setTransmitting(p.transmitting);
-        if (p.connected) setConnecting(false);
+        if (p.connected) {
+          setConnecting(false);
+          setSigUp(true);
+        }
       } else if (p.type === "log") setLog(p.text);
       else if (p.type === "net") setNet({ peers: p.peers, up: p.up_kbps, down: p.down_kbps });
       else if (p.type === "rekeyed") {
         setKeyInfo({ gen: p.generation, at: Date.now() });
         setRotating(false);
         setLog(`🔑 Schlüssel rotiert (Generation #${p.generation}${p.by ? `, durch ${p.by}` : ""})`);
+      } else if (p.type === "signaling") {
+        setSigUp(p.up);
+        if (p.up) setResuming(false);
       }
     });
     return () => {
@@ -135,6 +164,7 @@ export default function App() {
   useEffect(() => {
     invoke("set_ptt_binding", { code: pttBinding }).catch(() => {});
     const offPtt = listen<boolean>("ptt", (e) => {
+      if (micMutedRef.current) return; // self-muted: ignore push-to-talk
       invoke("set_transmit", { on: e.payload }).catch(() => {});
     });
     const offBound = listen<string>("ptt-bound", (e) => {
@@ -161,6 +191,11 @@ export default function App() {
     invoke("rotate_key").catch(() => setRotating(false));
     // safety: clear the spinner even if no rekeyed event arrives
     setTimeout(() => setRotating(false), 8000);
+  };
+  const resumeSession = () => {
+    setResuming(true);
+    invoke("reconnect_session").catch(() => setResuming(false));
+    setTimeout(() => setResuming(false), 8000);
   };
 
   const copy = (t: string) => navigator.clipboard?.writeText(t);
@@ -352,6 +387,15 @@ export default function App() {
       </header>
       {showSettings && deviceSettings}
 
+      {!sigUp && (
+        <div className="sigbanner">
+          <span>⚠ Signaling getrennt — P2P-Audio läuft weiter.</span>
+          <button className="btn sm" onClick={resumeSession} disabled={resuming}>
+            {resuming ? "Verbinde…" : "Session wiederaufnehmen"}
+          </button>
+        </div>
+      )}
+
       <div className="netbar">
         <span>P2P: <b>{p2pCount}</b></span>
         <span>↑ {measured ? "" : "~"}{up} kbps</span>
@@ -417,10 +461,21 @@ export default function App() {
               )}
             </div>
           ))}
-          <button className={`ptt ${transmitting ? "live" : ""}`} onClick={ptt}>
-            {transmitting ? "● SENDEN AKTIV" : "PUSH TO TALK"}
+          <button className={`ptt ${transmitting ? "live" : ""} ${micMuted ? "muted" : ""}`} onClick={ptt} disabled={micMuted}>
+            {micMuted ? "🔇 MIKRO STUMM" : transmitting ? "● SENDEN AKTIV" : "PUSH TO TALK"}
             <span className="ptthint">{pttLabel(pttBinding)} halten · oder klick zum Umschalten</span>
           </button>
+          <div className="selfctl">
+            <button className={`ctl ${transmitting ? "on" : ""}`} onClick={ptt} disabled={micMuted} title="Dauersenden ein/aus">
+              {transmitting ? "🟢 Sendet (Toggle)" : "🔘 Toggle senden"}
+            </button>
+            <button className={`ctl ${micMuted ? "on" : ""}`} onClick={toggleMic} title="Eigenes Mikrofon stummschalten (du hörst weiter)">
+              {micMuted ? "🔇 Mikro stumm" : "🎙️ Mikro an"}
+            </button>
+            <button className={`ctl ${deaf ? "on" : ""}`} onClick={toggleDeaf} title="Ton aus (nichts hören)">
+              {deaf ? "🔕 Ton aus" : "🔊 Ton an"}
+            </button>
+          </div>
         </section>
 
         <section className="chat">

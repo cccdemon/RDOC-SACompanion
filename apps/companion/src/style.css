@@ -205,3 +205,9 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 
 /* Low-bandwidth indicator */
 .netbar .lowbw { color: #9be7a0; font-size: .8rem; }
+
+/* Settings panel: scroll within instead of pushing the gear off-screen */
+.settings { max-height: 60vh; overflow-y: auto; }
+.setshead { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; background: #0f1320; padding: .2rem 0 .4rem; margin-bottom: .2rem; border-bottom: 1px solid #1e293b; z-index: 1; }
+.setshead .x { background: none; border: none; color: #9aa3ad; font-size: 1.2rem; cursor: pointer; line-height: 1; }
+.setshead .x:hover { color: #e2e8f0; }

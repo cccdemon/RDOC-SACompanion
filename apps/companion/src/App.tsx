@@ -440,6 +440,10 @@ export default function App() {
 
   const deviceSettings = (
     <div className="settings">
+      <div className="setshead">
+        <b>Einstellungen</b>
+        <button className="x" title="Schließen" onClick={() => setShowSettings(false)}>×</button>
+      </div>
       <label>🎤 Mikrofon</label>
       <select value={audioCfg.input} onChange={(e) => saveAudioCfg({ ...audioCfg, input: e.target.value })}>
         <option value="">Standard-Gerät</option>

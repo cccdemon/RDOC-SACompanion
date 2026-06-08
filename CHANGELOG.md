@@ -2,6 +2,13 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.12 — 2026-06-08
+
+### Fixed
+- **Settings panel could not be closed** when opened before a session: the long panel
+  pushed the gear button off-screen. The panel now scrolls (max 60vh) and has a sticky
+  header with an explicit × close button.
+
 ## Website i18n — 2026-06-08
 
 - The public website (`/`, `/privacy`, `/legal`, `/license`, `/j/:code`) is now available in

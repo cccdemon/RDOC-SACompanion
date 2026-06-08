@@ -253,8 +253,8 @@ impl Mesh {
             let report = p.pc.get_stats().await;
             for v in report.reports.values() {
                 if let webrtc::stats::StatsReportType::Transport(t) = v {
-                    up += t.bytes_sent;
-                    down += t.bytes_received;
+                    up += t.bytes_sent as u64;
+                    down += t.bytes_received as u64;
                 }
             }
         }

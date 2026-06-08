@@ -2,6 +2,13 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.14 — 2026-06-08
+
+### Added
+- **Automatic signaling reconnect** with backoff (2→4→…→30 s). On loss the UI shows
+  "Signaling verloren — automatischer Reconnect läuft…" (P2P audio keeps running); the
+  button is now "Jetzt wiederverbinden" for an immediate retry. Re-join keeps the mesh.
+
 ## v0.1.13 — 2026-06-08
 
 ### Fixed

@@ -630,9 +630,9 @@ export default function App() {
 
       {!sigUp && (
         <div className="sigbanner">
-          <span>⚠ Signaling getrennt — P2P-Audio läuft weiter.</span>
+          <span>⚠ Signaling verloren — automatischer Reconnect läuft… (P2P-Audio läuft weiter)</span>
           <button className="btn sm" onClick={resumeSession} disabled={resuming}>
-            {resuming ? "Verbinde…" : "Session wiederaufnehmen"}
+            {resuming ? "Verbinde…" : "Jetzt wiederverbinden"}
           </button>
         </div>
       )}

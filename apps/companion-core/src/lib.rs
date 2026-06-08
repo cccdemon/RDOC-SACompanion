@@ -318,6 +318,9 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
         let mut last_bytes = (0u64, 0u64);
         let mut last_inst = std::time::Instant::now();
         let mut net_primed = false;
+        // Auto-reconnect of the signaling link: when down, retry with backoff.
+        let mut next_try: Option<tokio::time::Instant> = None;
+        let mut backoff = 2u64;
         loop {
             tokio::select! {
                 _ = net_iv.tick() => {
@@ -339,6 +342,36 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                 Some(up) = up_rx.recv() => {
                     if let Some(o) = &cur_out { let _ = o.send(up); }
                 }
+                // Auto-reconnect attempt (only while signaling is down).
+                _ = async {
+                    match next_try {
+                        Some(t) => tokio::time::sleep_until(t).await,
+                        None => std::future::pending().await,
+                    }
+                }, if cur_in.is_none() => {
+                    match signaling::connect(&rc_server, rc_cert.as_deref()).await {
+                        Ok(sig2) => {
+                            let o2 = sig2.out.clone();
+                            let _ = o2.send(ClientMsg::Join {
+                                room: rc_room.clone(),
+                                user_id: rc_user.clone(),
+                                name: rc_name.clone(),
+                                token: rc_token.clone(),
+                            });
+                            cur_out = Some(o2);
+                            cur_in = Some(sig2.incoming);
+                            next_try = None;
+                            backoff = 2;
+                            sink(UiEvent::Signaling { up: true });
+                            sink(UiEvent::Log { text: "Signaling wiederverbunden.".into() });
+                        }
+                        Err(e) => {
+                            backoff = (backoff * 2).min(30);
+                            next_try = Some(tokio::time::Instant::now() + Duration::from_secs(backoff));
+                            sink(UiEvent::Log { text: format!("Reconnect fehlgeschlagen ({e}) - neuer Versuch in {backoff}s.") });
+                        }
+                    }
+                }
                 msg = async {
                     match cur_in.as_mut() {
                         Some(rx) => rx.recv().await,
@@ -346,12 +379,14 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                     }
                 } => {
                     let Some(msg) = msg else {
-                        // Signaling dropped, but the P2P mesh (audio/chat) is
-                        // independent and keeps running. Offer a resume.
+                        // Signaling dropped — P2P mesh keeps running. Start auto-
+                        // reconnecting (backoff); the UI shows the lost/retry state.
                         cur_in = None;
                         cur_out = None;
+                        backoff = 2;
+                        next_try = Some(tokio::time::Instant::now() + Duration::from_secs(backoff));
                         sink(UiEvent::Signaling { up: false });
-                        sink(UiEvent::Log { text: "Signaling getrennt - P2P laeuft weiter. Session wiederaufnehmen zum Neuverbinden.".into() });
+                        sink(UiEvent::Log { text: "Signaling verloren - automatischer Reconnect laeuft.".into() });
                         continue;
                     };
                     match msg {
@@ -434,23 +469,10 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                             if let Some(o) = &cur_out { let _ = o.send(ClientMsg::Rekey); }
                         }
                         Some(Cmd::Reconnect) => {
-                            match signaling::connect(&rc_server, rc_cert.as_deref()).await {
-                                Ok(sig2) => {
-                                    let o2 = sig2.out.clone();
-                                    let _ = o2.send(ClientMsg::Join {
-                                        room: rc_room.clone(),
-                                        user_id: rc_user.clone(),
-                                        name: rc_name.clone(),
-                                        token: rc_token.clone(),
-                                    });
-                                    cur_out = Some(o2);
-                                    cur_in = Some(sig2.incoming);
-                                    sink(UiEvent::Signaling { up: true });
-                                    sink(UiEvent::Log { text: "Signaling wiederverbunden.".into() });
-                                }
-                                Err(e) => {
-                                    sink(UiEvent::Log { text: format!("Wiederverbinden fehlgeschlagen: {e}") });
-                                }
+                            // Manual "resume now": trigger an immediate attempt.
+                            if cur_in.is_none() {
+                                backoff = 2;
+                                next_try = Some(tokio::time::Instant::now());
                             }
                         }
                         None => {

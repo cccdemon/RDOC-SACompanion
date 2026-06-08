@@ -139,6 +139,13 @@ export default function App() {
       return true;
     }
   });
+  const [showRekeyBtn, setShowRekeyBtn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("sa.showrekey") !== "0"; // default: show
+    } catch {
+      return true;
+    }
+  });
   const [lowBw, setLowBw] = useState<boolean>(() => {
     try {
       return localStorage.getItem("sa.lowbw") === "1";
@@ -226,6 +233,17 @@ export default function App() {
       const nv = !v;
       try {
         localStorage.setItem("sa.showkbps", nv ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return nv;
+    });
+  };
+  const toggleRekeyBtn = () => {
+    setShowRekeyBtn((v) => {
+      const nv = !v;
+      try {
+        localStorage.setItem("sa.showrekey", nv ? "1" : "0");
       } catch {
         /* ignore */
       }
@@ -539,6 +557,9 @@ export default function App() {
           <div className="sub2" style={{ opacity: 0.7 }}>
             Erzeugt für alle Teilnehmer neue Schlüssel (DTLS-SRTP re-handshake). Nur während einer Session.
           </div>
+          <button className={`btn sm ${showRekeyBtn ? "primary" : ""}`} onClick={toggleRekeyBtn}>
+            {showRekeyBtn ? "Button in der Leiste: sichtbar" : "Button in der Leiste: ausgeblendet"}
+          </button>
 
           <label>🛰 TURN-Relay-Fallback</label>
           <button className={`btn sm ${relayFb ? "primary" : ""}`} onClick={toggleRelayFb}>
@@ -751,14 +772,16 @@ export default function App() {
           </span>
         )}
         {lowBw && <span className="lowbw" title="Low-Bandwidth-Modus aktiv">🐢 Low-BW</span>}
-        <button
-          className="rekey"
-          title="Erzeugt für alle Teilnehmer neue Verschlüsselungs-Keys (DTLS-SRTP re-handshake)"
-          onClick={rotateKey}
-          disabled={rotating}
-        >
-          {rotating ? "⏳ Verschlüssele neu…" : `🔑 Session neu verschlüsseln · #${keyInfo.gen}`}
-        </button>
+        {showRekeyBtn && (
+          <button
+            className="rekey"
+            title="Erzeugt für alle Teilnehmer neue Verschlüsselungs-Keys (DTLS-SRTP re-handshake)"
+            onClick={rotateKey}
+            disabled={rotating}
+          >
+            {rotating ? "⏳ Verschlüssele neu…" : `🔑 Session neu verschlüsseln · #${keyInfo.gen}`}
+          </button>
+        )}
       </div>
 
       <div className="volrow">

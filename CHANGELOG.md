@@ -2,6 +2,11 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.21 — 2026-06-08
+
+### Added
+- The netbar "Session neu verschlüsseln" button can be shown/hidden via the Experte menu.
+
 ## v0.1.20 — 2026-06-08
 
 ### Added

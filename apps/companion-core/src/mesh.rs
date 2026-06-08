@@ -253,20 +253,28 @@ impl Mesh {
         }
     }
 
-    /// Room-wide key rotation: tear down every PeerConnection and re-handshake,
-    /// yielding fresh DTLS-SRTP keys on every link. Re-offers follow the same
-    /// glare rule (smaller user_id offers); the answerer rebuilds in on_offer.
+    /// Room-wide key rotation: re-handshake every link to get fresh DTLS-SRTP
+    /// keys. Glare-aware to avoid a teardown race: for each pair only the
+    /// smaller user_id tears down + re-offers; the larger side keeps its old PC
+    /// and lets `on_offer` replace it when the fresh offer arrives. Everyone
+    /// receives the broadcast Rekey, so every pair gets exactly one re-offer.
     pub async fn rekey(&mut self) -> Result<()> {
         let ids: Vec<String> = self.peers.keys().cloned().collect();
         for id in &ids {
-            if let Some(old) = self.peers.remove(id) {
-                let _ = old.pc.close().await;
+            if self.my_id.as_str() < id.as_str() {
+                if let Some(old) = self.peers.remove(id) {
+                    let _ = old.pc.close().await;
+                }
+                self.on_peer(id).await?; // ensure a fresh PC + re-offer
             }
-        }
-        for id in &ids {
-            self.on_peer(id).await?;
+            // else: answerer — on_offer() will swap in the new PC.
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn peer_pc(&self, id: &str) -> Option<Arc<RTCPeerConnection>> {
+        self.peers.get(id).map(|p| p.pc.clone())
     }
 
     /// Sum transport bytes (sent, received) across all peer connections.
@@ -331,5 +339,114 @@ async fn read_track(track: Arc<TrackRemote>, peer: String, dtx: DecodeTx) {
             }
             Err(_) => break,
         }
+    }
+}
+
+#[cfg(test)]
+mod rekey_tests {
+    use super::*;
+    use crate::build_api;
+    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::Mutex as AsyncMutex;
+    use webrtc::api::media_engine::MIME_TYPE_OPUS;
+    use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+
+    fn track() -> Arc<TrackLocalStaticSample> {
+        Arc::new(TrackLocalStaticSample::new(
+            RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_OPUS.to_owned(),
+                clock_rate: 48000,
+                channels: 2,
+                ..Default::default()
+            },
+            "audio".to_owned(),
+            "t".to_owned(),
+        ))
+    }
+
+    async fn wait_connected(m: &AsyncMutex<Mesh>, peer: &str) -> bool {
+        for _ in 0..150 {
+            if let Some(pc) = m.lock().await.peer_pc(peer) {
+                if pc.connection_state() == RTCPeerConnectionState::Connected {
+                    return true;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    }
+
+    // Two real meshes wired through a mock relay: connect, rotate keys, and
+    // verify both links re-handshake into brand-new PeerConnections (= new
+    // DTLS-SRTP keys) and reach Connected again.
+    #[tokio::test]
+    async fn rekey_rebuilds_and_reconnects() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let (out_a_tx, mut out_a_rx) = unbounded_channel::<ClientMsg>();
+        let (out_b_tx, mut out_b_rx) = unbounded_channel::<ClientMsg>();
+        let (dec_a, mut dec_a_rx) = unbounded_channel::<(String, Bytes)>();
+        let (dec_b, mut dec_b_rx) = unbounded_channel::<(String, Bytes)>();
+        let (ev_a, mut ev_a_rx) = unbounded_channel::<MeshEvent>();
+        let (ev_b, mut ev_b_rx) = unbounded_channel::<MeshEvent>();
+        tokio::spawn(async move { while dec_a_rx.recv().await.is_some() {} });
+        tokio::spawn(async move { while dec_b_rx.recv().await.is_some() {} });
+        tokio::spawn(async move { while ev_a_rx.recv().await.is_some() {} });
+        tokio::spawn(async move { while ev_b_rx.recv().await.is_some() {} });
+
+        let a = Arc::new(AsyncMutex::new(Mesh::new(
+            Arc::new(build_api().unwrap()), track(), "a".into(), out_a_tx, dec_a, ev_a,
+        )));
+        let b = Arc::new(AsyncMutex::new(Mesh::new(
+            Arc::new(build_api().unwrap()), track(), "b".into(), out_b_tx, dec_b, ev_b,
+        )));
+
+        // Mock relay: forward each side's outbound to the other (stamped `from`).
+        {
+            let b2 = b.clone();
+            tokio::spawn(async move {
+                while let Some(msg) = out_a_rx.recv().await {
+                    let mut g = b2.lock().await;
+                    match msg {
+                        ClientMsg::Offer { sdp, .. } => { let _ = g.on_offer("a", sdp).await; }
+                        ClientMsg::Answer { sdp, .. } => { let _ = g.on_answer("a", sdp).await; }
+                        ClientMsg::Ice { candidate, .. } => { g.on_ice("a", candidate).await; }
+                        _ => {}
+                    }
+                }
+            });
+        }
+        {
+            let a2 = a.clone();
+            tokio::spawn(async move {
+                while let Some(msg) = out_b_rx.recv().await {
+                    let mut g = a2.lock().await;
+                    match msg {
+                        ClientMsg::Offer { sdp, .. } => { let _ = g.on_offer("b", sdp).await; }
+                        ClientMsg::Answer { sdp, .. } => { let _ = g.on_answer("b", sdp).await; }
+                        ClientMsg::Ice { candidate, .. } => { g.on_ice("b", candidate).await; }
+                        _ => {}
+                    }
+                }
+            });
+        }
+
+        a.lock().await.on_peer("b").await.unwrap();
+        assert!(wait_connected(&a, "b").await, "initial A->B connect failed");
+        assert!(wait_connected(&b, "a").await, "initial B->A connect failed");
+
+        let pc_a1 = a.lock().await.peer_pc("b").unwrap();
+        let pc_b1 = b.lock().await.peer_pc("a").unwrap();
+
+        // Broadcast Rekey reaches both clients.
+        a.lock().await.rekey().await.unwrap();
+        b.lock().await.rekey().await.unwrap();
+
+        assert!(wait_connected(&a, "b").await, "A->B reconnect after rekey failed");
+        assert!(wait_connected(&b, "a").await, "B->A reconnect after rekey failed");
+
+        let pc_a2 = a.lock().await.peer_pc("b").unwrap();
+        let pc_b2 = b.lock().await.peer_pc("a").unwrap();
+        assert!(!Arc::ptr_eq(&pc_a1, &pc_a2), "A kept the same PC (no rekey)");
+        assert!(!Arc::ptr_eq(&pc_b1, &pc_b2), "B kept the same PC (no rekey)");
     }
 }

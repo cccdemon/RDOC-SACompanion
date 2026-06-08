@@ -197,6 +197,7 @@ pub fn run_devices(
     rate_tx: std::sync::mpsc::Sender<(u32, u32)>,
     in_name: Option<String>,
     out_name: Option<String>,
+    stop: Arc<AtomicBool>,
 ) {
     let host = cpal::default_host();
     let in_want = in_name.or_else(|| std::env::var("IN_DEVICE").ok());
@@ -215,42 +216,107 @@ pub fn run_devices(
     let out_s = build_output(&outp, play).expect("output stream");
     in_s.play().expect("play input");
     out_s.play().expect("play output");
-    loop {
-        std::thread::sleep(Duration::from_secs(3600));
+    // Hold the streams alive until shutdown; dropping them stops capture/playback.
+    while !stop.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
-/// Simple feed-forward dynamics compressor (mono, −1..1). Smooths loud/quiet
-/// swings so everyone sits at a similar level. On by default in the capture path.
-struct Compressor {
-    env: f32,
-    atk: f32,
-    rel: f32,
-    thr: f32,
-    ratio: f32,
-    makeup: f32,
+/// Configurable capture-path DSP chain. All three stages are toggleable and live
+/// (read each frame). Thresholds/ceiling are linear (0..1, i.e. fraction of full
+/// scale). Defaults are on; the limiter prevents the makeup-gain clipping that
+/// caused occasional crackle.
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct DspConfig {
+    pub gate: bool,
+    pub gate_threshold: f32, // below this the noise gate closes (~0.015 ≈ -36 dB)
+    pub compressor: bool,
+    pub comp_threshold: f32, // knee start (~0.15 ≈ -16 dB)
+    pub comp_ratio: f32,     // >= 1
+    pub comp_makeup: f32,    // post-gain
+    pub limiter: bool,
+    pub limiter_ceiling: f32, // hard peak ceiling (~0.97)
 }
-impl Compressor {
-    fn new() -> Self {
-        Compressor {
-            env: 0.0,
-            atk: (-1.0f32 / (0.005 * OPUS_SR as f32)).exp(), // ~5 ms attack
-            rel: (-1.0f32 / (0.080 * OPUS_SR as f32)).exp(), // ~80 ms release
-            thr: 0.15,                                        // ~ −16 dBFS
-            ratio: 3.0,
-            makeup: 1.8,
+impl Default for DspConfig {
+    fn default() -> Self {
+        DspConfig {
+            gate: true,
+            gate_threshold: 0.015,
+            compressor: true,
+            comp_threshold: 0.15,
+            comp_ratio: 3.0,
+            comp_makeup: 1.4,
+            limiter: true,
+            limiter_ceiling: 0.97,
         }
     }
-    fn process(&mut self, x: f32) -> f32 {
-        let a = x.abs();
-        let coef = if a > self.env { self.atk } else { self.rel };
-        self.env = coef * self.env + (1.0 - coef) * a;
-        let gain = if self.env > self.thr {
-            (self.thr + (self.env - self.thr) / self.ratio) / self.env.max(1e-6)
-        } else {
-            1.0
-        };
-        (x * gain * self.makeup).clamp(-1.0, 1.0)
+}
+
+/// Per-stream DSP state (noise gate → compressor → limiter), mono −1..1.
+struct Dsp {
+    gate_env: f32,
+    gate_gain: f32,
+    comp_env: f32,
+    lim_gain: f32,
+    atk: f32,
+    rel: f32,
+    gate_open: f32,
+    gate_close: f32,
+    lim_rel: f32,
+}
+impl Dsp {
+    fn new() -> Self {
+        let sr = OPUS_SR as f32;
+        Dsp {
+            gate_env: 0.0,
+            gate_gain: 1.0,
+            comp_env: 0.0,
+            lim_gain: 1.0,
+            atk: (-1.0f32 / (0.005 * sr)).exp(),        // comp ~5 ms attack
+            rel: (-1.0f32 / (0.080 * sr)).exp(),        // comp ~80 ms release
+            gate_open: (-1.0f32 / (0.002 * sr)).exp(),  // gate opens fast (2 ms)
+            gate_close: (-1.0f32 / (0.150 * sr)).exp(), // gate closes slow (150 ms)
+            lim_rel: (-1.0f32 / (0.050 * sr)).exp(),    // limiter release 50 ms
+        }
+    }
+    fn process(&mut self, x: f32, c: &DspConfig) -> f32 {
+        let mut s = x;
+        if c.gate {
+            let a = s.abs();
+            self.gate_env = if a > self.gate_env {
+                a
+            } else {
+                self.rel * self.gate_env + (1.0 - self.rel) * a
+            };
+            let target = if self.gate_env >= c.gate_threshold { 1.0 } else { 0.0 };
+            let coef = if target > self.gate_gain { self.gate_open } else { self.gate_close };
+            self.gate_gain = coef * self.gate_gain + (1.0 - coef) * target;
+            s *= self.gate_gain;
+        }
+        if c.compressor {
+            let a = s.abs();
+            let coef = if a > self.comp_env { self.atk } else { self.rel };
+            self.comp_env = coef * self.comp_env + (1.0 - coef) * a;
+            let gain = if self.comp_env > c.comp_threshold {
+                (c.comp_threshold + (self.comp_env - c.comp_threshold) / c.comp_ratio.max(1.0))
+                    / self.comp_env.max(1e-6)
+            } else {
+                1.0
+            };
+            s = s * gain * c.comp_makeup;
+        }
+        if c.limiter {
+            let ceil = c.limiter_ceiling.clamp(0.05, 1.0);
+            let peak = s.abs();
+            let target = if peak > ceil { ceil / peak } else { 1.0 };
+            if target < self.lim_gain {
+                self.lim_gain = target; // instant attack: never let a peak through
+            } else {
+                self.lim_gain = self.lim_rel * self.lim_gain + (1.0 - self.lim_rel); // release →1
+            }
+            s *= self.lim_gain;
+        }
+        s.clamp(-1.0, 1.0) // final safety net
     }
 }
 
@@ -260,13 +326,23 @@ impl Compressor {
 /// RNNoise removes background noise (fan, keyboard, hum). It is NOT echo
 /// cancellation — without a headset, speaker echo still leaks; full APM-AEC
 /// (libwebrtc) doesn't build on Windows-MSVC, so headset stays recommended.
-pub fn encode_loop(cap: Buf, in_rate: u32, transmit: Arc<AtomicBool>, opus_tx: UnboundedSender<Bytes>) {
+#[allow(clippy::too_many_arguments)]
+pub fn encode_loop(
+    cap: Buf,
+    in_rate: u32,
+    transmit: Arc<AtomicBool>,
+    opus_tx: UnboundedSender<Bytes>,
+    dsp_cfg: Arc<Mutex<DspConfig>>,
+    mix: MixMap,
+    monitor: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+) {
     const NS: usize = DenoiseState::FRAME_SIZE; // 480 = 10ms @ 48k
     let enc = Encoder::new(SampleRate::Hz48000, Channels::Mono, Application::Voip)
         .expect("opus encoder");
     let mut up = Resampler::new(in_rate, OPUS_SR);
     let mut den = DenoiseState::new();
-    let mut comp = Compressor::new();
+    let mut dsp = Dsp::new();
     let mut buf48: Vec<f32> = Vec::new(); // post-resample, −1..1
     let mut den_in = [0f32; NS];
     let mut den_out = [0f32; NS];
@@ -274,6 +350,9 @@ pub fn encode_loop(cap: Buf, in_rate: u32, transmit: Arc<AtomicBool>, opus_tx: U
     let mut frame = [0i16; FRAME];
     let mut encoded = [0u8; 4000];
     loop {
+        if stop.load(Ordering::SeqCst) {
+            return;
+        }
         let chunk: Vec<f32> = {
             let mut b = cap.lock().unwrap();
             if b.is_empty() {
@@ -298,8 +377,20 @@ pub fn encode_loop(cap: Buf, in_rate: u32, transmit: Arc<AtomicBool>, opus_tx: U
             }
         }
         while clean.len() >= FRAME {
+            let cfg = *dsp_cfg.lock().unwrap(); // snapshot once per 20 ms frame
             for (i, s) in clean.drain(..FRAME).enumerate() {
-                frame[i] = (comp.process(s) * 32767.0) as i16;
+                frame[i] = (dsp.process(s, &cfg) * 32767.0) as i16;
+            }
+            // Mic self-check: route the processed mic to local playback as "self".
+            if monitor.load(Ordering::SeqCst) {
+                let mut m = mix.lock().unwrap();
+                let b = m.entry("self".to_string()).or_default();
+                for s in frame.iter() {
+                    b.push_back(*s);
+                }
+                while b.len() > 9600 {
+                    b.pop_front(); // ~200ms cap
+                }
             }
             if transmit.load(Ordering::SeqCst) {
                 if let Ok(n) = enc.encode(&frame[..], &mut encoded[..]) {
@@ -333,9 +424,12 @@ pub fn decode_loop(mut rx: UnboundedReceiver<(String, Bytes)>, mix: MixMap) {
 
 /// 20ms clock: sum each peer's 48k frame (int16 clamp), resample 48k→out, push
 /// to the playback ring.
-pub fn mixer_loop(mix: MixMap, play: Buf, out_rate: u32, gains: Arc<Gains>) {
+pub fn mixer_loop(mix: MixMap, play: Buf, out_rate: u32, gains: Arc<Gains>, stop: Arc<AtomicBool>) {
     let mut down = Resampler::new(OPUS_SR, out_rate);
     loop {
+        if stop.load(Ordering::SeqCst) {
+            return;
+        }
         std::thread::sleep(Duration::from_millis(20));
         let mut mixed = [0i32; FRAME];
         let mut any = false;

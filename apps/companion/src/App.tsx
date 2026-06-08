@@ -32,6 +32,28 @@ type UiEvent =
   | { type: "rekeyed"; generation: number; by: string }
   | { type: "signaling"; up: boolean };
 
+// Capture-path DSP (must match companion_core::audio::DspConfig field names).
+type DspConfig = {
+  gate: boolean;
+  gate_threshold: number;
+  compressor: boolean;
+  comp_threshold: number;
+  comp_ratio: number;
+  comp_makeup: number;
+  limiter: boolean;
+  limiter_ceiling: number;
+};
+const DSP_DEFAULT: DspConfig = {
+  gate: true,
+  gate_threshold: 0.015,
+  compressor: true,
+  comp_threshold: 0.15,
+  comp_ratio: 3.0,
+  comp_makeup: 1.4,
+  limiter: true,
+  limiter_ceiling: 0.97,
+};
+
 export default function App() {
   const [connected, setConnected] = useState(false);
   const [transmitting, setTransmitting] = useState(false);
@@ -78,6 +100,14 @@ export default function App() {
   const [micMuted, setMicMuted] = useState(false);
   const micMutedRef = useRef(false);
   const [deaf, setDeaf] = useState(false);
+  const [dsp, setDsp] = useState<DspConfig>(() => {
+    try {
+      return { ...DSP_DEFAULT, ...JSON.parse(localStorage.getItem("sa.dsp") || "{}") };
+    } catch {
+      return DSP_DEFAULT;
+    }
+  });
+  const [monitoring, setMonitoring] = useState(false);
   const [pttBinding, setPttBinding] = useState<string>(() => {
     try {
       return localStorage.getItem("sa.ptt") || "F8";
@@ -119,6 +149,34 @@ export default function App() {
     setDeaf((d) => {
       const nv = !d;
       invoke("set_master_volume", { volume: nv ? 0 : masterVol / 100 }).catch(() => {});
+      return nv;
+    });
+  };
+  const toggleMonitor = () => {
+    setMonitoring((m) => {
+      const nv = !m;
+      invoke("set_monitor", { on: nv }).catch(() => {});
+      return nv;
+    });
+  };
+  const onDisconnect = () => {
+    invoke("disconnect").catch(() => {});
+    setMonitoring(false);
+    setMicMuted(false);
+    micMutedRef.current = false;
+    setDeaf(false);
+    setShowSettings(false);
+    // The engine emits Status{connected:false}, which returns us to the start screen.
+  };
+  const updateDsp = (patch: Partial<DspConfig>) => {
+    setDsp((d) => {
+      const nv = { ...d, ...patch };
+      try {
+        localStorage.setItem("sa.dsp", JSON.stringify(nv));
+      } catch {
+        /* ignore */
+      }
+      invoke("set_dsp", { cfg: nv }).catch(() => {});
       return nv;
     });
   };
@@ -182,6 +240,11 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Push saved DSP settings to the engine once connected.
+  useEffect(() => {
+    if (connected) invoke("set_dsp", { cfg: dsp }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
   const rebindPtt = () => {
     setCapturing(true);
     invoke("start_ptt_capture").catch(() => {});
@@ -303,6 +366,54 @@ export default function App() {
       <div className="sub2" style={{ opacity: 0.7 }}>
         Push-to-Talk: jede Taste oder Maustaste (RAW). Geräteänderung wird beim nächsten Verbinden aktiv.
       </div>
+
+      <label>🎧 Mikrofon-Test</label>
+      <button className={`btn sm ${monitoring ? "primary" : ""}`} onClick={toggleMonitor}>
+        {monitoring ? "■ Test stoppen" : "▶ Eigenwiedergabe"}
+      </button>
+      <div className="sub2" style={{ opacity: 0.7 }}>
+        Hörst dein eigenes Mikrofon (inkl. Aufbereitung). Headset empfohlen (sonst Rückkopplung).
+      </div>
+
+      <label>🎚 Audio-Aufbereitung</label>
+      <div className="dsp">
+        <div className="dsphead">
+          <label className="chk"><input type="checkbox" checked={dsp.gate} onChange={(e) => updateDsp({ gate: e.target.checked })} /> Noise Gate</label>
+        </div>
+        <div className="dsprow">
+          <span>Schwelle</span>
+          <input type="range" min={0} max={80} value={Math.round(dsp.gate_threshold * 1000)} disabled={!dsp.gate} onChange={(e) => updateDsp({ gate_threshold: Number(e.target.value) / 1000 })} />
+          <span className="vval">{Math.round(dsp.gate_threshold * 1000)}</span>
+        </div>
+
+        <div className="dsphead">
+          <label className="chk"><input type="checkbox" checked={dsp.compressor} onChange={(e) => updateDsp({ compressor: e.target.checked })} /> Kompressor</label>
+        </div>
+        <div className="dsprow">
+          <span>Schwelle</span>
+          <input type="range" min={5} max={50} value={Math.round(dsp.comp_threshold * 100)} disabled={!dsp.compressor} onChange={(e) => updateDsp({ comp_threshold: Number(e.target.value) / 100 })} />
+          <span className="vval">{Math.round(dsp.comp_threshold * 100)}</span>
+        </div>
+        <div className="dsprow">
+          <span>Ratio</span>
+          <input type="range" min={10} max={100} value={Math.round(dsp.comp_ratio * 10)} disabled={!dsp.compressor} onChange={(e) => updateDsp({ comp_ratio: Number(e.target.value) / 10 })} />
+          <span className="vval">{(dsp.comp_ratio).toFixed(1)}:1</span>
+        </div>
+        <div className="dsprow">
+          <span>Makeup</span>
+          <input type="range" min={10} max={30} value={Math.round(dsp.comp_makeup * 10)} disabled={!dsp.compressor} onChange={(e) => updateDsp({ comp_makeup: Number(e.target.value) / 10 })} />
+          <span className="vval">{(dsp.comp_makeup).toFixed(1)}×</span>
+        </div>
+
+        <div className="dsphead">
+          <label className="chk"><input type="checkbox" checked={dsp.limiter} onChange={(e) => updateDsp({ limiter: e.target.checked })} /> Limiter (gegen Knacken)</label>
+        </div>
+        <div className="dsprow">
+          <span>Ceiling</span>
+          <input type="range" min={50} max={100} value={Math.round(dsp.limiter_ceiling * 100)} disabled={!dsp.limiter} onChange={(e) => updateDsp({ limiter_ceiling: Number(e.target.value) / 100 })} />
+          <span className="vval">{Math.round(dsp.limiter_ceiling * 100)}%</span>
+        </div>
+      </div>
     </div>
   );
   const rotatedAt = keyInfo.at
@@ -384,6 +495,7 @@ export default function App() {
         <div className={`dot ${transmitting ? "tx" : "ok"}`} />
         <div className="hstatus">{transmitting ? "SENDEN" : "VERBUNDEN"}</div>
         <button className="gear" title="Audio-Einstellungen" onClick={() => setShowSettings((s) => !s)}>⚙</button>
+        <button className="leave" title="Session verlassen" onClick={onDisconnect}>Verlassen</button>
       </header>
       {showSettings && deviceSettings}
 

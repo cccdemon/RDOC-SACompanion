@@ -183,3 +183,15 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 .selfctl .ctl:disabled { opacity: .5; cursor: default; }
 .selfctl .ctl.on { background: #16323f; border-color: #2f6f86; color: #d6f0ff; }
 .ptt.muted { opacity: .55; }
+
+/* DSP section in the gear menu */
+.dsp { background: rgba(0,0,0,.25); border: 1px solid #1e293b; border-radius: 7px; padding: .5rem .6rem; margin-top: .3rem; }
+.dsp .dsphead { margin: .35rem 0 .15rem; }
+.dsp .chk { display: flex; align-items: center; gap: .4rem; font-size: .9rem; cursor: pointer; }
+.dsp .dsprow { display: flex; align-items: center; gap: .5rem; margin: .15rem 0 .15rem .3rem; }
+.dsp .dsprow > span:first-child { width: 4.5rem; font-size: .8rem; color: #9aa3ad; }
+.dsp .dsprow input[type=range] { flex: 1; }
+.dsp .dsprow .vval { width: 3rem; text-align: right; font-size: .8rem; color: #cfe3ff; }
+/* Leave/disconnect button */
+.leave { background: #3a1620; color: #ffd0d8; border: 1px solid #6b2436; border-radius: 6px; padding: .3rem .7rem; font-size: .8rem; cursor: pointer; margin-left: .4rem; }
+.leave:hover { background: #4a1c2a; }

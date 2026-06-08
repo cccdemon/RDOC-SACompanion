@@ -257,6 +257,28 @@ fn reconnect_session(state: State<AppState>) {
     }
 }
 
+#[tauri::command]
+fn set_dsp(state: State<AppState>, cfg: companion_core::audio::DspConfig) {
+    if let Some(e) = state.engine.lock().unwrap().as_ref() {
+        e.set_dsp(cfg);
+    }
+}
+
+#[tauri::command]
+fn set_monitor(state: State<AppState>, on: bool) {
+    if let Some(e) = state.engine.lock().unwrap().as_ref() {
+        e.set_monitor(on);
+    }
+}
+
+/// Leave the session: drop the engine (stops mesh + audio threads) → the engine
+/// task emits Status{connected:false}, returning the UI to the start screen.
+#[tauri::command]
+fn disconnect(state: State<AppState>) {
+    *state.engine.lock().unwrap() = None;
+    *state.serverless.lock().unwrap() = None;
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState { engine: Mutex::new(None), serverless: Mutex::new(None) })
@@ -278,6 +300,9 @@ fn main() {
             list_audio_devices,
             rotate_key,
             reconnect_session,
+            set_dsp,
+            set_monitor,
+            disconnect,
             set_ptt_binding,
             start_ptt_capture
         ])

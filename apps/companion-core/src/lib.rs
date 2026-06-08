@@ -87,6 +87,16 @@ enum Cmd {
 pub struct Engine {
     cmd_tx: mpsc::UnboundedSender<Cmd>,
     gains: Arc<audio::Gains>,
+    dsp: Arc<Mutex<audio::DspConfig>>,
+    monitor: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+}
+impl Drop for Engine {
+    fn drop(&mut self) {
+        // Tell the audio threads to exit so a later reconnect doesn't stack
+        // duplicate capture/playback rigs.
+        self.stop.store(true, Ordering::SeqCst);
+    }
 }
 impl Engine {
     pub fn toggle_transmit(&self) {
@@ -108,6 +118,14 @@ impl Engine {
     /// down the live P2P mesh.
     pub fn reconnect(&self) {
         let _ = self.cmd_tx.send(Cmd::Reconnect);
+    }
+    /// Live capture-path DSP config (noise gate / compressor / limiter).
+    pub fn set_dsp(&self, cfg: audio::DspConfig) {
+        *self.dsp.lock().unwrap() = cfg;
+    }
+    /// Mic self-check: route the (processed) mic to local playback.
+    pub fn set_monitor(&self, on: bool) {
+        self.monitor.store(on, Ordering::SeqCst);
     }
     /// Overall output volume (0.0 mute … 1.0 normal … 2.0 +6 dB). Live.
     pub fn set_master_volume(&self, v: f32) {
@@ -139,36 +157,45 @@ pub(crate) fn setup_audio(
     mpsc::UnboundedReceiver<Bytes>,
     mpsc::UnboundedSender<(String, Bytes)>,
     Arc<audio::Gains>,
+    Arc<Mutex<audio::DspConfig>>,
+    Arc<AtomicBool>, // mic self-check (monitor) toggle
+    Arc<AtomicBool>, // shutdown flag for the audio threads
 )> {
     let cap: Buf = Arc::new(Mutex::new(VecDeque::new()));
     let play: Buf = Arc::new(Mutex::new(VecDeque::new()));
     let mix: MixMap = Arc::new(Mutex::new(HashMap::new()));
     let transmit = Arc::new(AtomicBool::new(false));
     let gains = Arc::new(audio::Gains::new());
+    let dsp_cfg = Arc::new(Mutex::new(audio::DspConfig::default()));
+    let monitor = Arc::new(AtomicBool::new(false));
+    let stop = Arc::new(AtomicBool::new(false));
 
     let (rate_tx, rate_rx) = std::sync::mpsc::channel::<(u32, u32)>();
     {
-        let (cap, play) = (cap.clone(), play.clone());
-        std::thread::spawn(move || audio::run_devices(cap, play, rate_tx, in_name, out_name));
+        let (cap, play, stop) = (cap.clone(), play.clone(), stop.clone());
+        std::thread::spawn(move || audio::run_devices(cap, play, rate_tx, in_name, out_name, stop));
     }
     let (in_rate, out_rate) = rate_rx.recv()?;
 
     let (opus_tx, opus_rx) = mpsc::unbounded_channel::<Bytes>();
     let (decode_tx, decode_rx) = mpsc::unbounded_channel::<(String, Bytes)>();
     {
-        let (cap, transmit) = (cap.clone(), transmit.clone());
-        std::thread::spawn(move || audio::encode_loop(cap, in_rate, transmit, opus_tx));
+        let (cap, transmit, dsp_cfg, mix, monitor, stop) =
+            (cap.clone(), transmit.clone(), dsp_cfg.clone(), mix.clone(), monitor.clone(), stop.clone());
+        std::thread::spawn(move || {
+            audio::encode_loop(cap, in_rate, transmit, opus_tx, dsp_cfg, mix, monitor, stop)
+        });
     }
     {
         let mix = mix.clone();
         std::thread::spawn(move || audio::decode_loop(decode_rx, mix));
     }
     {
-        let gains = gains.clone();
-        std::thread::spawn(move || audio::mixer_loop(mix, play, out_rate, gains));
+        let (gains, stop) = (gains.clone(), stop.clone());
+        std::thread::spawn(move || audio::mixer_loop(mix, play, out_rate, gains, stop));
     }
 
-    Ok((transmit, opus_rx, decode_tx, gains))
+    Ok((transmit, opus_rx, decode_tx, gains, dsp_cfg, monitor, stop))
 }
 
 struct Member {
@@ -211,7 +238,7 @@ fn emit_roster(
 pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let (transmit, mut opus_rx, decode_tx, gains) =
+    let (transmit, mut opus_rx, decode_tx, gains, dsp_cfg, monitor, stop) =
         setup_audio(cfg.input_device.clone(), cfg.output_device.clone())?;
 
     let api = Arc::new(build_api()?);
@@ -412,5 +439,5 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
         }
     });
 
-    Ok(Engine { cmd_tx, gains })
+    Ok(Engine { cmd_tx, gains, dsp: dsp_cfg, monitor, stop })
 }

@@ -2,6 +2,22 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.9 — 2026-06-08
+
+### Fixed
+- **Occasional audio crackle**: the capture-path compressor's makeup gain could
+  clip on the final clamp. Added a smooth peak **limiter** (instant attack, 50 ms
+  release) after the compressor and lowered default makeup 1.8→1.4 — no more clip.
+
+### Added
+- **Configurable audio chain in the gear menu**: Noise Gate, Compressor (threshold/
+  ratio/makeup) and Limiter (ceiling) — each toggleable + adjustable, persisted,
+  pushed live (`DspConfig`, `set_dsp`). All on by default.
+- **Mic self-check** (gear menu): local monitor playback of your own (processed) mic.
+- **Disconnect / "Verlassen"** button → returns to the create/join screen. Cleanly
+  stops the engine **and** the audio threads (shutdown flag) so a later reconnect
+  doesn't stack duplicate capture/playback rigs.
+
 ## v0.1.8 — 2026-06-08
 
 ### Fixed

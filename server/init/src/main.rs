@@ -12,16 +12,19 @@
 //! Subcommand: `init-connection mint <room>` prints that room's join token.
 
 mod auth;
+mod i18n;
 mod sessions;
 mod tls;
 mod turn;
+
+use i18n::Lang;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
@@ -337,32 +340,21 @@ async fn join_session(
     }
 }
 
-/// Human landing page for a share link: shows the code + download + instructions.
-async fn landing(Path(code): Path<String>) -> Html<String> {
-    let base = public_base();
-    // Reflected value: cap length + HTML-escape (defends against XSS via the path).
+/// Best language for a request: ?lang= → Accept-Language → English.
+fn lang_of(q: &Option<String>, headers: &HeaderMap) -> Lang {
+    let qlang = q
+        .as_deref()
+        .and_then(|s| s.split('&').find_map(|kv| kv.strip_prefix("lang=")));
+    let accept = headers.get("accept-language").and_then(|v| v.to_str().ok());
+    Lang::detect(qlang, accept)
+}
+
+/// Human landing page for a share link (localized; code is HTML-escaped).
+async fn landing(Path(code): Path<String>, RawQuery(q): RawQuery, headers: HeaderMap) -> Html<String> {
+    let lang = lang_of(&q, &headers);
     let code = esc(&code.chars().take(32).collect::<String>());
-    Html(format!(
-        r#"<!doctype html><html lang="de"><head><meta charset="utf-8">{HTML_CSP}
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RDOC SquadLink Lite — Session beitreten</title>
-<style>body{{font-family:system-ui,sans-serif;background:#020814;color:#e2e8f0;max-width:34rem;margin:6vh auto;padding:0 1.2rem;line-height:1.6}}
-.code{{font-size:1.6rem;font-weight:700;letter-spacing:.1em;background:#0b1626;border:1px solid #1e293b;border-radius:8px;padding:.6rem 1rem;display:inline-block}}
-a.btn{{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;background:#0284c7;color:#fff;border-radius:8px;text-decoration:none;font-weight:600}}
-.muted{{color:#94a3b8;font-size:.92rem}}</style></head>
-<body>
-<h1>RDOC SquadLink Lite</h1>
-<p>Du wurdest zu einer Voice-Session eingeladen.</p>
-<p class="muted">Session-Code:</p>
-<p class="code">{code}</p>
-<ol>
-<li>App noch nicht installiert? <a href="{base}/download/">Hier herunterladen</a> und installieren.</li>
-<li>App öffnen → <b>Beitreten</b> → Code <code>{code}</code> + die <b>6-stellige PIN</b> (bekommst du vom Host) eingeben.</li>
-</ol>
-<p><a class="btn" href="{base}/download/">SquadLink Lite herunterladen</a></p>
-<p class="muted">Audio läuft direkt Peer-zu-Peer (verschlüsselt). Der Server vermittelt nur.</p>
-</body></html>"#
-    ))
+    let body = i18n::landing(lang, &public_base(), &code);
+    shell(lang, &format!("/j/{code}"), "RDOC SquadLink Lite", &body)
 }
 
 const PAGE_CSS: &str = r#"<style>
@@ -380,6 +372,10 @@ a{color:#7fb0ff}
 ul{padding-left:1.25rem;margin:.5rem 0}
 .links a{display:block;margin:.25rem 0}
 .dl{display:inline-block;margin:.5rem 0;padding:.5rem .9rem;border:1px solid #3a414e;border-radius:5px;text-decoration:none;color:#dfe3e8}
+.code{font-size:1.5rem;font-weight:700;letter-spacing:.1em;background:#0b1626;border:1px solid #1e293b;border-radius:8px;padding:.5rem 1rem;display:inline-block}
+.lang{margin-left:auto;display:flex;gap:.45rem}
+.lang a{color:#9aa3ad;font-size:.78rem;text-decoration:none}
+.lang a.on{color:#7fb0ff;font-weight:700}
 footer{max-width:40rem;margin:0 auto;padding:1rem 1.2rem;border-top:1px solid #242833;color:#9aa3ad;font-size:.82rem}
 footer a{color:#9aa3ad;margin-right:1rem;display:inline-block}
 code{background:#1a1d23;padding:.1rem .3rem;border-radius:3px}
@@ -388,140 +384,56 @@ code{background:#1a1d23;padding:.1rem .3rem;border-radius:3px}
 // The standard raumdock logo (same SVG used across the RDOC web surfaces).
 const LOGO: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%230a0a0a'/%3E%3Cpath d='M22 62 q28 14 56 0 l-6-22 q-24-10-44 0 z' fill='%23444'/%3E%3Cellipse cx='50' cy='46' rx='26' ry='18' fill='%23f6c200'/%3E%3Cellipse cx='62' cy='40' rx='8' ry='5' fill='%23ffffff' opacity='.5'/%3E%3C/svg%3E";
 
-const GITHUB_URL: &str = "https://github.com/cccdemon/RDOC-SquadLinkLite";
-const RAUMDOCK_URL: &str = "https://raumdock.org";
-const FLEET_URL: &str = "https://suite.raumdock.org/fleetplanner";
-
-fn footer_html(base: &str) -> String {
+fn footer(base: &str, lang: Lang) -> String {
+    let n = i18n::nav(lang);
+    let lc = lang.code();
     format!(
-        r#"<a href="/">Start</a><a href="{base}/download/">Download</a><a href="/privacy">Datenschutz</a><a href="/legal">Impressum</a><a href="/license">Lizenz</a><a href="{GITHUB_URL}">GitHub</a><a href="{RAUMDOCK_URL}">raumdock.org</a><span class="muted">· serverless P2P voice mesh</span>"#
+        r#"<a href="{base}/download/">{}</a><a href="/privacy?lang={lc}">{}</a><a href="/legal?lang={lc}">{}</a><a href="/license?lang={lc}">{}</a><a href="{gh}">GitHub</a><a href="{rd}">raumdock.org</a>"#,
+        n[0], n[1], n[2], n[3], gh = i18n::GITHUB_URL, rd = i18n::RAUMDOCK_URL
     )
 }
 
-fn shell(title: &str, body: &str) -> Html<String> {
+fn shell(lang: Lang, path: &str, title: &str, body: &str) -> Html<String> {
     let base = public_base();
+    let lc = lang.code();
     Html(format!(
-        "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">{HTML_CSP}\
+        "<!doctype html><html lang=\"{lc}\"><head><meta charset=\"utf-8\">{HTML_CSP}\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <title>{title} — RDOC SquadLink Lite</title><link rel=\"icon\" href=\"{base}/download/sl-logo.png\">{css}</head><body>\
-<header class=\"top\"><img src=\"{base}/download/sl-logo.png\" alt=\"SquadLink Lite\" onerror=\"this.onerror=null;this.src='{logo}'\"><a href=\"/\">RDOC SquadLink Lite</a></header>\
+<header class=\"top\"><img src=\"{base}/download/sl-logo.png\" alt=\"SquadLink Lite\" onerror=\"this.onerror=null;this.src='{logo}'\"><a href=\"/?lang={lc}\">RDOC SquadLink Lite</a>{sw}</header>\
 <main>{body}</main><footer>{footer}</footer></body></html>",
         base = base,
         logo = LOGO,
         css = PAGE_CSS,
-        footer = footer_html(&base),
+        sw = i18n::switcher(path, lang),
+        footer = footer(&base, lang),
     ))
 }
 
-async fn home() -> Html<String> {
-    let base = public_base();
-    shell(
-        "Was ist das?",
-        &format!(
-            r#"<h1>RDOC SquadLink Lite</h1>
-<p>Ein einfacher Peer-to-Peer-Voice-Chat für kleine Gruppen. Push-to-Talk,
-ohne Account, ohne Aufnahme, verschlüsselt.</p>
-<p>Die Stimme läuft direkt zwischen den Spielern (WebRTC/Opus). Es gibt keinen Server,
-der mithört — ein kleiner Dienst stellt nur die Verbindung her.</p>
-<h2>So funktioniert es</h2>
-<ul>
-<li>Host erstellt in der App eine Session und erhält einen Link und eine 6-stellige PIN.</li>
-<li>Mitspieler öffnen den Link, installieren die App, geben Code und PIN ein.</li>
-<li>Die Session bleibt bestehen, solange Teilnehmer verbunden sind (maximal 24&nbsp;Stunden).</li>
-</ul>
-<p><a class="dl" href="{base}/download/">App herunterladen (Windows)</a></p>
-<p class="muted">Prototyp, unsigniert. Windows SmartScreen: „Weitere Informationen" und „Trotzdem ausführen".</p>
-<h2>Links</h2>
-<p class="links">
-<a href="{RAUMDOCK_URL}">raumdock.org</a>
-<a href="{FLEET_URL}">RDOC Fleetmanager</a>
-<a href="{GITHUB_URL}">Quellcode auf GitHub</a>
-</p>
-<p class="muted"><a href="/privacy">Datenschutz</a> · <a href="/legal">Impressum</a> · <a href="/license">Lizenz</a></p>"#
-        ),
-    )
+async fn home(RawQuery(q): RawQuery, headers: HeaderMap) -> Html<String> {
+    let lang = lang_of(&q, &headers);
+    let (title, body) = i18n::home(lang, &public_base());
+    shell(lang, "/", title, &body)
 }
 
-async fn privacy() -> Html<String> {
-    shell(
-        "Datenschutz",
-        r#"<h1>Datenschutzerklärung</h1>
-<p class="muted">Stand: 2026-06. RDOC SquadLink Lite ist auf Datensparsamkeit ausgelegt.</p>
-<h2>Was NICHT passiert</h2>
-<ul>
-<li><b>Keine Audio-/Chat-Aufzeichnung.</b> Sprache und Text laufen direkt Peer-to-Peer
-(DTLS-SRTP bzw. verschlüsselter DataChannel) und werden nirgends gespeichert.</li>
-<li><b>Keine Benutzerkonten</b>, kein Login, kein Tracking, keine Werbung, keine Cookies.</li>
-<li>Der Vermittlungsserver <b>sieht den Medieninhalt nicht</b> — Stimme/Chat fließen nie über ihn.</li>
-</ul>
-<h2>Was verarbeitet wird</h2>
-<ul>
-<li><b>Signaling</b> (Vermittlung): Beim Verbinden tauschen die Apps über den Server Verbindungsdaten
-aus (SDP/ICE-Kandidaten, gewählter Anzeigename, Raum-/Session-Zuordnung). Diese Daten liegen nur
-<b>flüchtig im Arbeitsspeicher</b> und werden gelöscht, sobald der Raum leer ist (spätestens nach 24&nbsp;h).</li>
-<li><b>Session-Vermittlung</b>: Ein zufälliger Code + 6-stellige PIN werden temporär im Speicher
-gehalten (max. 24&nbsp;h), um Mitspielern den konfigurationslosen Beitritt zu ermöglichen.</li>
-<li><b>Verbindungs-Metadaten</b>: Wie bei jedem Internetdienst sind dem Server beim Verbinden die
-IP-Adressen technisch bekannt; sie werden nicht dauerhaft protokolliert.</li>
-<li><b>TURN-Relay (nur Fallback)</b>: Falls keine direkte Verbindung möglich ist, kann verschlüsselter
-Audioverkehr über einen Relay laufen. Der Relay leitet nur <b>verschlüsselte Bytes</b> weiter und
-kann den Inhalt nicht entschlüsseln.</li>
-</ul>
-<h2>Drittanbieter</h2>
-<p>Die App-Installer werden über GitHub Releases bereitgestellt; beim Download gelten die
-Datenschutzbestimmungen von GitHub. STUN/TURN kann öffentliche STUN-Server (z. B. von Cloudflare)
-zur NAT-Erkennung nutzen.</p>
-<h2>Kontakt</h2>
-<p>Verantwortlich: siehe <a href="/legal">Impressum</a>. Anfragen über die Kontaktwege auf
-<a href="https://raumdock.org">raumdock.org</a>.</p>"#,
-    )
+async fn privacy(RawQuery(q): RawQuery, headers: HeaderMap) -> Html<String> {
+    let lang = lang_of(&q, &headers);
+    let (title, body) = i18n::privacy(lang);
+    shell(lang, "/privacy", title, &body)
 }
 
-async fn legal() -> Html<String> {
-    shell(
-        "Impressum",
-        r#"<h1>Impressum / Rechtliches</h1>
-<p>RDOC SquadLink Lite ist ein nicht-kommerzielles Community-Projekt
-(<a href="https://raumdock.org">raumdock.org</a>).</p>
-<h2>Autoren</h2>
-<p>head87x &amp; justcallmedeimos</p>
-<h2>Anbieter</h2>
-<p class="muted">
-<!-- TODO: vollständige Anbieterkennzeichnung (Name, Anschrift, Kontakt) gemäß §5 DDG eintragen -->
-Verantwortlicher Betreiber: raumdock.org<br>
-Kontakt: über <a href="https://raumdock.org">raumdock.org</a>
-</p>
-<h2>Haftung</h2>
-<p>Die Software wird „wie besehen", ohne Gewähr und ohne Haftung bereitgestellt (siehe
-<a href="/license">Lizenz</a>). Für Inhalte verlinkter externer Seiten sind deren Betreiber verantwortlich.</p>"#,
-    )
+async fn legal(RawQuery(q): RawQuery, headers: HeaderMap) -> Html<String> {
+    let lang = lang_of(&q, &headers);
+    let (title, body) = i18n::legal(lang);
+    shell(lang, "/legal", title, &body)
 }
 
-async fn license_page() -> Html<String> {
-    shell(
-        "Lizenz",
-        &format!(
-            r#"<h1>Lizenz — nicht-kommerziell</h1>
-<p>RDOC SquadLink Lite steht unter der <b>PolyForm Noncommercial License 1.0.0</b>.</p>
-<h2>Kurz gesagt</h2>
-<ul>
-<li>Nutzen, kopieren, ändern, weitergeben — für jeden nicht-kommerziellen Zweck
-(privat, Community, Bildung, Forschung).</li>
-<li>Keine kommerzielle Nutzung ohne gesonderte Lizenz.</li>
-<li>Lizenz- und Urhebervermerke beibehalten.</li>
-<li>Ohne Gewähr / ohne Haftung.</li>
-</ul>
-<h2>Kommerzielle Nutzung</h2>
-<p>Kommerzielle Nutzung erfordert eine separate kommerzielle Lizenz. Dazu zählen u.&nbsp;a.
-Verkauf, Unterlizenzierung, Betrieb als bezahlter Dienst, Integration in kommerzielle Produkte
-oder Nutzung in umsatzgenerierenden Aktivitäten.</p>
-<p>Anfragen: <a href="mailto:commercialusage@raumdock.org">commercialusage@raumdock.org</a></p>
-<p>Dies ist eine Zusammenfassung — verbindlich ist der vollständige Lizenztext:</p>
-<p><a class="dl" href="{GITHUB_URL}/blob/main/LICENSE">Vollständige Lizenz (LICENSE) ansehen</a></p>
-<p class="muted">© head87x &amp; justcallmedeimos. PolyForm Noncommercial License 1.0.0 — siehe polyformproject.org.</p>"#
-        ),
-    )
+async fn license_page(RawQuery(q): RawQuery, headers: HeaderMap) -> Html<String> {
+    let lang = lang_of(&q, &headers);
+    let (title, body) = i18n::license(lang);
+    shell(lang, "/license", title, &body)
 }
+
 
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let (mut sink, mut stream) = socket.split();

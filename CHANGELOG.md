@@ -2,6 +2,12 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## Website i18n — 2026-06-08
+
+- The public website (`/`, `/privacy`, `/legal`, `/license`, `/j/:code`) is now available in
+  **EN / DE / IT / ES / FR** with a language switcher; language is picked from `?lang=` then
+  the `Accept-Language` header (default English). Server-side only — no app release.
+
 ## v0.1.11 — 2026-06-08
 
 ### Security

@@ -2,6 +2,12 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.23 — 2026-06-08
+
+### Fixed
+- A joiner can now re-share the **exact same session** (same code + same PIN) — the in-session
+  "Session teilen" box is populated from the joined code/PIN, not just for the host.
+
 ## v0.1.21 — 2026-06-08
 
 ### Added

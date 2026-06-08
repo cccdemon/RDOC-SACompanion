@@ -484,6 +484,8 @@ export default function App() {
       if (r.status === 404) throw new Error("Session nicht gefunden / abgelaufen");
       if (!r.ok) throw new Error("Server " + r.status);
       const j = await r.json();
+      // Let a joiner re-share the EXACT same session: same code + same PIN.
+      setSessionInfo({ link: `${base}/j/${code}`, pin: joinPin.trim(), code });
       await connectWith(j.ws, j.room, j.token);
     } catch (e) {
       setLog(String(e));

@@ -244,6 +244,23 @@ impl Mesh {
         }
     }
 
+    /// Sum transport bytes (sent, received) across all peer connections.
+    /// Counts the real DTLS/SRTP+SCTP traffic — for live up/down bandwidth.
+    pub async fn stats_bytes(&self) -> (u64, u64) {
+        let mut up = 0u64;
+        let mut down = 0u64;
+        for p in self.peers.values() {
+            let report = p.pc.get_stats().await;
+            for v in report.reports.values() {
+                if let webrtc::stats::StatsReportType::Transport(t) = v {
+                    up += t.bytes_sent;
+                    down += t.bytes_received;
+                }
+            }
+        }
+        (up, down)
+    }
+
     /// Broadcast a chat line over every peer's DataChannel.
     pub async fn broadcast_chat(&self, text: &str) {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);

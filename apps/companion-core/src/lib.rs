@@ -47,6 +47,8 @@ pub enum UiEvent {
     Chat { from: String, text: String },
     Status { connected: bool, transmitting: bool },
     Log { text: String },
+    /// Live network: connected peer count + measured up/down kbps.
+    Net { peers: usize, up_kbps: u32, down_kbps: u32 },
 }
 
 pub type Sink = Arc<dyn Fn(UiEvent) + Send + Sync>;
@@ -237,8 +239,27 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
     let me_name = cfg.name.clone();
     tokio::spawn(async move {
         let mut members: HashMap<String, Member> = HashMap::new();
+        let mut net_iv = tokio::time::interval(Duration::from_secs(2));
+        let mut last_bytes = (0u64, 0u64);
+        let mut last_inst = std::time::Instant::now();
+        let mut net_primed = false;
         loop {
             tokio::select! {
+                _ = net_iv.tick() => {
+                    let (up, down) = mesh.stats_bytes().await;
+                    if !net_primed {
+                        last_bytes = (up, down);
+                        last_inst = std::time::Instant::now();
+                        net_primed = true;
+                    } else {
+                        let dt = last_inst.elapsed().as_secs_f64().max(0.001);
+                        let up_kbps = ((up.saturating_sub(last_bytes.0)) as f64 * 8.0 / 1000.0 / dt) as u32;
+                        let down_kbps = ((down.saturating_sub(last_bytes.1)) as f64 * 8.0 / 1000.0 / dt) as u32;
+                        last_bytes = (up, down);
+                        last_inst = std::time::Instant::now();
+                        sink(UiEvent::Net { peers: members.len(), up_kbps, down_kbps });
+                    }
+                }
                 msg = incoming.recv() => {
                     let Some(msg) = msg else {
                         sink(UiEvent::Status { connected: false, transmitting: transmit.load(Ordering::SeqCst) });

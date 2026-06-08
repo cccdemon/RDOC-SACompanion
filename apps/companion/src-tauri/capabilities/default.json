@@ -7,9 +7,6 @@
     "core:default",
     "core:event:default",
     "core:window:default",
-    "core:app:default",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister",
-    "global-shortcut:allow-is-registered"
+    "core:app:default"
   ]
 }

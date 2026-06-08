@@ -2,7 +2,8 @@
 //! Tauri shell for RDOC SquadLink Lite. Thin layer over companion-core: commands
 //! drive the engine, engine state is forwarded to the webview as "ui" events.
 
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use companion_core::serverless::Serverless;
 use companion_core::{start, Engine, EngineConfig, Sink, UiEvent};
@@ -11,6 +12,64 @@ use tauri::{AppHandle, Emitter, State};
 struct AppState {
     engine: Mutex<Option<Engine>>,
     serverless: Mutex<Option<Arc<Serverless>>>,
+}
+
+// ── Configurable PTT via RAW global input (keyboard + mouse buttons) ──────────
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+static PTT_BINDING: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static PTT_CAPTURE: AtomicBool = AtomicBool::new(false);
+
+fn ptt_binding() -> &'static Mutex<Option<String>> {
+    PTT_BINDING.get_or_init(|| Mutex::new(Some("F8".into())))
+}
+
+/// Stable string code for a raw key or mouse button (+ pressed flag).
+fn raw_code(ev: &rdev::EventType) -> Option<(String, bool)> {
+    use rdev::EventType::{ButtonPress, ButtonRelease, KeyPress, KeyRelease};
+    match ev {
+        KeyPress(k) => Some((format!("{k:?}"), true)),
+        KeyRelease(k) => Some((format!("{k:?}"), false)),
+        ButtonPress(b) => Some((format!("Mouse:{b:?}"), true)),
+        ButtonRelease(b) => Some((format!("Mouse:{b:?}"), false)),
+        _ => None,
+    }
+}
+
+/// Global raw-input listener. In capture mode the next press becomes the new
+/// binding (emitted as `ptt-bound`); otherwise the bound code toggles transmit
+/// via the `ptt` event. Runs on its own thread (rdev::listen blocks).
+fn start_raw_input() {
+    std::thread::spawn(|| {
+        let _ = rdev::listen(move |event| {
+            let Some((code, down)) = raw_code(&event.event_type) else { return };
+            if PTT_CAPTURE.load(Ordering::SeqCst) {
+                if down {
+                    PTT_CAPTURE.store(false, Ordering::SeqCst);
+                    *ptt_binding().lock().unwrap() = Some(code.clone());
+                    if let Some(app) = APP_HANDLE.get() {
+                        let _ = app.emit("ptt-bound", code);
+                    }
+                }
+                return;
+            }
+            let bound = ptt_binding().lock().unwrap().clone();
+            if bound.as_deref() == Some(code.as_str()) {
+                if let Some(app) = APP_HANDLE.get() {
+                    let _ = app.emit("ptt", down);
+                }
+            }
+        });
+    });
+}
+
+#[tauri::command]
+fn set_ptt_binding(code: Option<String>) {
+    *ptt_binding().lock().unwrap() = code;
+}
+
+#[tauri::command]
+fn start_ptt_capture() {
+    PTT_CAPTURE.store(true, Ordering::SeqCst);
 }
 
 fn make_sink(app: &AppHandle) -> Sink {
@@ -121,8 +180,12 @@ fn list_audio_devices() -> (Vec<String>, Vec<String>) {
 
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(AppState { engine: Mutex::new(None), serverless: Mutex::new(None) })
+        .setup(|app| {
+            let _ = APP_HANDLE.set(app.handle().clone());
+            start_raw_input();
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             connect,
             serverless_offer,
@@ -133,7 +196,9 @@ fn main() {
             send_chat,
             set_master_volume,
             set_peer_volume,
-            list_audio_devices
+            list_audio_devices,
+            set_ptt_binding,
+            start_ptt_capture
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri app");

@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 
-const PTT_KEY = "F8";
+// Friendly label for raw rdev codes (e.g. "F8", "KeyR", "Mouse:Unknown(1)").
+function pttLabel(code: string): string {
+  if (code.startsWith("Mouse:")) {
+    const b = code.slice(6);
+    const m = b.match(/Unknown\((\d+)\)/);
+    if (m) return `Maustaste ${Number(m[1]) + 3}`; // Unknown(1)→Mouse4
+    return `Maus ${b}`;
+  }
+  return code.replace(/^Key/, "");
+}
 
 type Participant = {
   user_id: string;
@@ -18,7 +26,8 @@ type UiEvent =
   | { type: "roster"; participants: Participant[] }
   | { type: "chat"; from: string; text: string }
   | { type: "status"; connected: boolean; transmitting: boolean }
-  | { type: "log"; text: string };
+  | { type: "log"; text: string }
+  | { type: "net"; peers: number; up_kbps: number; down_kbps: number };
 
 export default function App() {
   const [connected, setConnected] = useState(false);
@@ -58,6 +67,15 @@ export default function App() {
   });
   const [masterVol, setMasterVol] = useState(100); // percent
   const [peerVol, setPeerVol] = useState<Record<string, number>>({});
+  const [net, setNet] = useState<{ peers: number; up: number; down: number } | null>(null);
+  const [pttBinding, setPttBinding] = useState<string>(() => {
+    try {
+      return localStorage.getItem("sa.ptt") || "F8";
+    } catch {
+      return "F8";
+    }
+  });
+  const [capturing, setCapturing] = useState(false);
 
   // Load device list once (for the gear settings).
   useEffect(() => {
@@ -92,6 +110,7 @@ export default function App() {
         setTransmitting(p.transmitting);
         if (p.connected) setConnecting(false);
       } else if (p.type === "log") setLog(p.text);
+      else if (p.type === "net") setNet({ peers: p.peers, up: p.up_kbps, down: p.down_kbps });
     });
     return () => {
       un.then((f) => f());
@@ -102,16 +121,32 @@ export default function App() {
     chatEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
 
-  // Hold-to-talk global hotkey while connected: press = transmit, release = stop.
+  // Configurable PTT via RAW global input (rdev in Rust). The bound key/mouse
+  // button emits "ptt" (down/up); "ptt-bound" fires after a rebind capture.
   useEffect(() => {
-    if (!connected) return;
-    register(PTT_KEY, (e: { state: string }) => {
-      invoke("set_transmit", { on: e.state === "Pressed" });
-    }).catch(() => {});
+    invoke("set_ptt_binding", { code: pttBinding }).catch(() => {});
+    const offPtt = listen<boolean>("ptt", (e) => {
+      invoke("set_transmit", { on: e.payload }).catch(() => {});
+    });
+    const offBound = listen<string>("ptt-bound", (e) => {
+      setPttBinding(e.payload);
+      setCapturing(false);
+      try {
+        localStorage.setItem("sa.ptt", e.payload);
+      } catch {
+        /* ignore */
+      }
+    });
     return () => {
-      unregister(PTT_KEY).catch(() => {});
+      offPtt.then((f) => f());
+      offBound.then((f) => f());
     };
-  }, [connected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const rebindPtt = () => {
+    setCapturing(true);
+    invoke("start_ptt_capture").catch(() => {});
+  };
 
   const copy = (t: string) => navigator.clipboard?.writeText(t);
 
@@ -210,7 +245,14 @@ export default function App() {
         <option value="">Standard-Gerät</option>
         {devices.outputs.map((d) => <option key={d} value={d}>{d}</option>)}
       </select>
-      <div className="sub2" style={{ opacity: 0.7 }}>Geräteänderung wird beim nächsten Verbinden aktiv.</div>
+      <label>🎙 Push-to-Talk</label>
+      <div className="pttrow">
+        <span className="pttcur">{capturing ? "Drücke Taste / Maustaste…" : pttLabel(pttBinding)}</span>
+        <button className="btn sm" onClick={rebindPtt} disabled={capturing}>Neu belegen</button>
+      </div>
+      <div className="sub2" style={{ opacity: 0.7 }}>
+        Push-to-Talk: jede Taste oder Maustaste (RAW). Geräteänderung wird beim nächsten Verbinden aktiv.
+      </div>
     </div>
   );
   const encFooter = (
@@ -269,8 +311,11 @@ export default function App() {
     );
   }
 
-  const p2pCount = participants.filter((p) => !p.you && p.badge).length;
-  const kbps = p2pCount * 32; // ~32 kbps Opus per peer-stream (estimate)
+  const estPeers = participants.filter((p) => !p.you && p.badge).length;
+  const p2pCount = net?.peers ?? estPeers;
+  const up = net ? net.up : estPeers * 32;
+  const down = net ? net.down : estPeers * 32;
+  const measured = net != null;
 
   return (
     <div className="screen app">
@@ -284,14 +329,14 @@ export default function App() {
 
       <div className="netbar">
         <span>P2P: <b>{p2pCount}</b></span>
-        <span>↑ ~{kbps} kbps</span>
-        <span>↓ ~{kbps} kbps</span>
-        <span className="netest">(geschätzt)</span>
+        <span>↑ {measured ? "" : "~"}{up} kbps</span>
+        <span>↓ {measured ? "" : "~"}{down} kbps</span>
+        <span className="netest">({measured ? "gemessen" : "geschätzt"})</span>
       </div>
 
       <div className="volrow">
         <span className="vlabel">🔊 Gesamt</span>
-        <input type="range" min={0} max={200} value={masterVol} onChange={(e) => onMaster(Number(e.target.value))} />
+        <input type="range" min={0} max={100} value={masterVol} onChange={(e) => onMaster(Number(e.target.value))} />
         <span className="vval">{masterVol}%</span>
       </div>
 
@@ -330,7 +375,7 @@ export default function App() {
                   <input
                     type="range"
                     min={0}
-                    max={200}
+                    max={100}
                     value={peerVol[p.user_id] ?? 100}
                     onChange={(e) => onPeerVol(p.user_id, Number(e.target.value))}
                   />
@@ -341,7 +386,7 @@ export default function App() {
           ))}
           <button className={`ptt ${transmitting ? "live" : ""}`} onClick={ptt}>
             {transmitting ? "● SENDEN AKTIV" : "PUSH TO TALK"}
-            <span className="ptthint">{PTT_KEY} halten · oder klick zum Umschalten</span>
+            <span className="ptthint">{pttLabel(pttBinding)} halten · oder klick zum Umschalten</span>
           </button>
         </section>
 

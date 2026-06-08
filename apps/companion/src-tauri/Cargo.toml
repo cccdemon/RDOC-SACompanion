@@ -1,6 +1,6 @@
 [package]
 name = "rdoc-squadlink-lite"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 
 [build-dependencies]
@@ -8,9 +8,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-global-shortcut = "2"
 companion-core = { path = "../../companion-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
+# Raw global input (keyboard + mouse buttons) for the configurable PTT key.
+rdev = "0.5"

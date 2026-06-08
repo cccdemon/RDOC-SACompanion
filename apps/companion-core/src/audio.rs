@@ -220,8 +220,42 @@ pub fn run_devices(
     }
 }
 
+/// Simple feed-forward dynamics compressor (mono, −1..1). Smooths loud/quiet
+/// swings so everyone sits at a similar level. On by default in the capture path.
+struct Compressor {
+    env: f32,
+    atk: f32,
+    rel: f32,
+    thr: f32,
+    ratio: f32,
+    makeup: f32,
+}
+impl Compressor {
+    fn new() -> Self {
+        Compressor {
+            env: 0.0,
+            atk: (-1.0f32 / (0.005 * OPUS_SR as f32)).exp(), // ~5 ms attack
+            rel: (-1.0f32 / (0.080 * OPUS_SR as f32)).exp(), // ~80 ms release
+            thr: 0.15,                                        // ~ −16 dBFS
+            ratio: 3.0,
+            makeup: 1.8,
+        }
+    }
+    fn process(&mut self, x: f32) -> f32 {
+        let a = x.abs();
+        let coef = if a > self.env { self.atk } else { self.rel };
+        self.env = coef * self.env + (1.0 - coef) * a;
+        let gain = if self.env > self.thr {
+            (self.thr + (self.env - self.thr) / self.ratio) / self.env.max(1e-6)
+        } else {
+            1.0
+        };
+        (x * gain * self.makeup).clamp(-1.0, 1.0)
+    }
+}
+
 /// Capture → resample(in→48k) → RNNoise noise-suppression (10ms blocks) →
-/// 20ms frame → (if transmitting) Opus encode → WebRTC writer task.
+/// compressor → 20ms frame → (if transmitting) Opus encode → WebRTC writer task.
 ///
 /// RNNoise removes background noise (fan, keyboard, hum). It is NOT echo
 /// cancellation — without a headset, speaker echo still leaks; full APM-AEC
@@ -232,6 +266,7 @@ pub fn encode_loop(cap: Buf, in_rate: u32, transmit: Arc<AtomicBool>, opus_tx: U
         .expect("opus encoder");
     let mut up = Resampler::new(in_rate, OPUS_SR);
     let mut den = DenoiseState::new();
+    let mut comp = Compressor::new();
     let mut buf48: Vec<f32> = Vec::new(); // post-resample, −1..1
     let mut den_in = [0f32; NS];
     let mut den_out = [0f32; NS];
@@ -264,7 +299,7 @@ pub fn encode_loop(cap: Buf, in_rate: u32, transmit: Arc<AtomicBool>, opus_tx: U
         }
         while clean.len() >= FRAME {
             for (i, s) in clean.drain(..FRAME).enumerate() {
-                frame[i] = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
+                frame[i] = (comp.process(s) * 32767.0) as i16;
             }
             if transmit.load(Ordering::SeqCst) {
                 if let Ok(n) = enc.encode(&frame[..], &mut encoded[..]) {

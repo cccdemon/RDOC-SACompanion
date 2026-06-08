@@ -52,6 +52,10 @@ jobs:
         # not --frozen: manifests get edited during prototyping
         run: pnpm install --no-frozen-lockfile
 
+      - name: Generate app icons from the SquadLink Lite logo
+        working-directory: apps/companion
+        run: pnpm tauri icon src/Squad_Link_Lite.png
+
       - name: Build Tauri app (+ release on tag)
         uses: tauri-apps/tauri-action@v0
         env:

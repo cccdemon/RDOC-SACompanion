@@ -162,3 +162,7 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 /* PTT rebind row */
 .pttrow { display: flex; align-items: center; gap: .6rem; }
 .pttcur { flex: 1; font-family: ui-monospace, monospace; color: #38bdf8; background: rgba(0,0,0,.35); border: 1px solid #1e293b; border-radius: 6px; padding: .35rem .5rem; font-size: .85rem; }
+
+/* App logo on connect screen */
+.brandwrap { display: flex; align-items: center; gap: .55rem; }
+.applogo { width: 34px; height: 34px; border-radius: 7px; }

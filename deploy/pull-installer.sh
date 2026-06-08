@@ -4,7 +4,7 @@
 # Public repo → no auth/token needed. Run by a systemd timer on LXC 103.
 set -euo pipefail
 
-REPO="cccdemon/RDOC-SACompanion"
+REPO="cccdemon/RDOC-SquadLinkLite"
 DEST="/opt/RDOC-Suite/downloads/squadlink"
 API="https://api.github.com/repos/${REPO}/releases?per_page=10"
 # Robust against transient GitHub/CDN 5xx right after a release is published.

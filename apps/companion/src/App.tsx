@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import logo from "./Squad_Link_Lite.png";
 
 // Friendly label for raw rdev codes (e.g. "F8", "KeyR", "Mouse:Unknown(1)").
 function pttLabel(code: string): string {
@@ -267,7 +268,10 @@ export default function App() {
       <div className="screen center">
         <div className="card connect">
           <div className="brandrow">
-            <div className="brand">RDOC <span>// SQUADLINK LITE</span></div>
+            <div className="brandwrap">
+              <img src={logo} className="applogo" alt="" />
+              <div className="brand">RDOC <span>// SQUADLINK LITE</span></div>
+            </div>
             <button className="gear" title="Audio-Einstellungen" onClick={() => setShowSettings((s) => !s)}>⚙</button>
           </div>
           <div className="sub">P2P Voice + Chat</div>

@@ -112,6 +112,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = Router::new()
+        .route("/", get(home))
+        .route("/privacy", get(privacy))
+        .route("/legal", get(legal))
+        .route("/license", get(license_page))
         .route("/ws", get(ws_handler))
         .route("/healthz", get(|| async { "ok" }))
         // PIN-protected session brokering (REST, called by the app webview → CORS).
@@ -218,6 +222,159 @@ a.btn{{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;background:#028
 <p class="muted">Audio läuft direkt Peer-zu-Peer (verschlüsselt). Der Server vermittelt nur.</p>
 </body></html>"#
     ))
+}
+
+const PAGE_CSS: &str = r#"<style>
+:root{color-scheme:dark}
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0f1115;color:#dfe3e8;margin:0;line-height:1.6}
+main{max-width:40rem;margin:0 auto;padding:1.4rem 1.2rem 3rem}
+.top{display:flex;align-items:center;gap:.55rem;padding:.9rem 1.2rem;border-bottom:1px solid #242833}
+.top img{width:26px;height:26px;display:block}
+.top a{color:#dfe3e8;text-decoration:none;font-weight:600}
+h1{font-size:1.45rem;font-weight:600;margin:.3rem 0 .7rem}
+h2{font-size:1.05rem;font-weight:600;margin:1.5rem 0 .3rem}
+p{margin:.6rem 0}
+a{color:#7fb0ff}
+.muted{color:#9aa3ad;font-size:.9rem}
+ul{padding-left:1.25rem;margin:.5rem 0}
+.links a{display:block;margin:.25rem 0}
+.dl{display:inline-block;margin:.5rem 0;padding:.5rem .9rem;border:1px solid #3a414e;border-radius:5px;text-decoration:none;color:#dfe3e8}
+footer{max-width:40rem;margin:0 auto;padding:1rem 1.2rem;border-top:1px solid #242833;color:#9aa3ad;font-size:.82rem}
+footer a{color:#9aa3ad;margin-right:1rem;display:inline-block}
+code{background:#1a1d23;padding:.1rem .3rem;border-radius:3px}
+</style>"#;
+
+// The standard raumdock logo (same SVG used across the RDOC web surfaces).
+const LOGO: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='48' fill='%230a0a0a'/%3E%3Cpath d='M22 62 q28 14 56 0 l-6-22 q-24-10-44 0 z' fill='%23444'/%3E%3Cellipse cx='50' cy='46' rx='26' ry='18' fill='%23f6c200'/%3E%3Cellipse cx='62' cy='40' rx='8' ry='5' fill='%23ffffff' opacity='.5'/%3E%3C/svg%3E";
+
+const GITHUB_URL: &str = "https://github.com/cccdemon/RDOC-SquadLinkLite";
+const RAUMDOCK_URL: &str = "https://raumdock.org";
+const FLEET_URL: &str = "https://suite.raumdock.org/fleetplanner";
+
+fn footer_html(base: &str) -> String {
+    format!(
+        r#"<a href="/">Start</a><a href="{base}/download/">Download</a><a href="/privacy">Datenschutz</a><a href="/legal">Impressum</a><a href="/license">Lizenz</a><a href="{GITHUB_URL}">GitHub</a><a href="{RAUMDOCK_URL}">raumdock.org</a><span class="muted">· serverless P2P voice mesh</span>"#
+    )
+}
+
+fn shell(title: &str, body: &str) -> Html<String> {
+    let base = public_base();
+    Html(format!(
+        "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+<title>{title} — RDOC SquadLink Lite</title><link rel=\"icon\" href=\"{base}/download/sl-logo.png\">{css}</head><body>\
+<header class=\"top\"><img src=\"{base}/download/sl-logo.png\" alt=\"SquadLink Lite\" onerror=\"this.onerror=null;this.src='{logo}'\"><a href=\"/\">RDOC SquadLink Lite</a></header>\
+<main>{body}</main><footer>{footer}</footer></body></html>",
+        base = base,
+        logo = LOGO,
+        css = PAGE_CSS,
+        footer = footer_html(&base),
+    ))
+}
+
+async fn home() -> Html<String> {
+    let base = public_base();
+    shell(
+        "Was ist das?",
+        &format!(
+            r#"<h1>RDOC SquadLink Lite</h1>
+<p>Ein einfacher Peer-to-Peer-Voice-Chat für kleine Gruppen. Push-to-Talk,
+ohne Account, ohne Aufnahme, verschlüsselt.</p>
+<p>Die Stimme läuft direkt zwischen den Spielern (WebRTC/Opus). Es gibt keinen Server,
+der mithört — ein kleiner Dienst stellt nur die Verbindung her.</p>
+<h2>So funktioniert es</h2>
+<ul>
+<li>Host erstellt in der App eine Session und erhält einen Link und eine 6-stellige PIN.</li>
+<li>Mitspieler öffnen den Link, installieren die App, geben Code und PIN ein.</li>
+<li>Die Session bleibt bestehen, solange Teilnehmer verbunden sind (maximal 24&nbsp;Stunden).</li>
+</ul>
+<p><a class="dl" href="{base}/download/">App herunterladen (Windows)</a></p>
+<p class="muted">Prototyp, unsigniert. Windows SmartScreen: „Weitere Informationen" und „Trotzdem ausführen".</p>
+<h2>Links</h2>
+<p class="links">
+<a href="{RAUMDOCK_URL}">raumdock.org</a>
+<a href="{FLEET_URL}">RDOC Fleetmanager</a>
+<a href="{GITHUB_URL}">Quellcode auf GitHub</a>
+</p>
+<p class="muted"><a href="/privacy">Datenschutz</a> · <a href="/legal">Impressum</a> · <a href="/license">Lizenz</a></p>"#
+        ),
+    )
+}
+
+async fn privacy() -> Html<String> {
+    shell(
+        "Datenschutz",
+        r#"<h1>Datenschutzerklärung</h1>
+<p class="muted">Stand: 2026-06. RDOC SquadLink Lite ist auf Datensparsamkeit ausgelegt.</p>
+<h2>Was NICHT passiert</h2>
+<ul>
+<li><b>Keine Audio-/Chat-Aufzeichnung.</b> Sprache und Text laufen direkt Peer-to-Peer
+(DTLS-SRTP bzw. verschlüsselter DataChannel) und werden nirgends gespeichert.</li>
+<li><b>Keine Benutzerkonten</b>, kein Login, kein Tracking, keine Werbung, keine Cookies.</li>
+<li>Der Vermittlungsserver <b>sieht den Medieninhalt nicht</b> — Stimme/Chat fließen nie über ihn.</li>
+</ul>
+<h2>Was verarbeitet wird</h2>
+<ul>
+<li><b>Signaling</b> (Vermittlung): Beim Verbinden tauschen die Apps über den Server Verbindungsdaten
+aus (SDP/ICE-Kandidaten, gewählter Anzeigename, Raum-/Session-Zuordnung). Diese Daten liegen nur
+<b>flüchtig im Arbeitsspeicher</b> und werden gelöscht, sobald der Raum leer ist (spätestens nach 24&nbsp;h).</li>
+<li><b>Session-Vermittlung</b>: Ein zufälliger Code + 6-stellige PIN werden temporär im Speicher
+gehalten (max. 24&nbsp;h), um Mitspielern den konfigurationslosen Beitritt zu ermöglichen.</li>
+<li><b>Verbindungs-Metadaten</b>: Wie bei jedem Internetdienst sind dem Server beim Verbinden die
+IP-Adressen technisch bekannt; sie werden nicht dauerhaft protokolliert.</li>
+<li><b>TURN-Relay (nur Fallback)</b>: Falls keine direkte Verbindung möglich ist, kann verschlüsselter
+Audioverkehr über einen Relay laufen. Der Relay leitet nur <b>verschlüsselte Bytes</b> weiter und
+kann den Inhalt nicht entschlüsseln.</li>
+</ul>
+<h2>Drittanbieter</h2>
+<p>Die App-Installer werden über GitHub Releases bereitgestellt; beim Download gelten die
+Datenschutzbestimmungen von GitHub. STUN/TURN kann öffentliche STUN-Server (z. B. von Cloudflare)
+zur NAT-Erkennung nutzen.</p>
+<h2>Kontakt</h2>
+<p>Verantwortlich: siehe <a href="/legal">Impressum</a>. Anfragen über die Kontaktwege auf
+<a href="https://raumdock.org">raumdock.org</a>.</p>"#,
+    )
+}
+
+async fn legal() -> Html<String> {
+    shell(
+        "Impressum",
+        r#"<h1>Impressum / Rechtliches</h1>
+<p>RDOC SquadLink Lite ist ein nicht-kommerzielles Community-Projekt
+(<a href="https://raumdock.org">raumdock.org</a>).</p>
+<h2>Autoren</h2>
+<p>head87x &amp; justcallmedeimos</p>
+<h2>Anbieter</h2>
+<p class="muted">
+<!-- TODO: vollständige Anbieterkennzeichnung (Name, Anschrift, Kontakt) gemäß §5 DDG eintragen -->
+Verantwortlicher Betreiber: raumdock.org<br>
+Kontakt: über <a href="https://raumdock.org">raumdock.org</a>
+</p>
+<h2>Haftung</h2>
+<p>Die Software wird „wie besehen", ohne Gewähr und ohne Haftung bereitgestellt (siehe
+<a href="/license">Lizenz</a>). Für Inhalte verlinkter externer Seiten sind deren Betreiber verantwortlich.</p>"#,
+    )
+}
+
+async fn license_page() -> Html<String> {
+    shell(
+        "Lizenz",
+        &format!(
+            r#"<h1>Lizenz — nicht-kommerziell</h1>
+<p>RDOC SquadLink Lite steht unter der <b>PolyForm Noncommercial License 1.0.0</b>.</p>
+<h2>Kurz gesagt</h2>
+<ul>
+<li>✅ <b>Nutzen, kopieren, ändern, weitergeben</b> — für <b>jeden nicht-kommerziellen Zweck</b>
+(privat, Community, Bildung, Forschung).</li>
+<li>🚫 <b>Keine kommerzielle Nutzung</b> ohne gesonderte Erlaubnis.</li>
+<li>📝 Lizenz- und Urhebervermerke beibehalten.</li>
+<li>⚠️ Ohne Gewähr / ohne Haftung.</li>
+</ul>
+<p>Dies ist eine Zusammenfassung — verbindlich ist der vollständige Lizenztext:</p>
+<p><a class="dl" href="{GITHUB_URL}/blob/main/LICENSE">Vollständige Lizenz (LICENSE) ansehen</a></p>
+<p class="muted">© head87x &amp; justcallmedeimos. PolyForm Noncommercial License 1.0.0 — siehe polyformproject.org.</p>"#
+        ),
+    )
 }
 
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {

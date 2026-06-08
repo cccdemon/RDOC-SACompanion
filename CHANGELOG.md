@@ -2,6 +2,20 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.15 — 2026-06-08
+
+### Fixed
+- **Update checker never fired**: it trusted the REST `/releases` order (`[0]`), which is
+  wrong for force-pushed tags (returned v0.1.9). Now picks the highest semver itself.
+- **Settings menu couldn't be closed** when the long panel overflowed the window. The
+  settings are now a modal overlay with its own scroll — close via × or by clicking the
+  backdrop, independent of page scroll.
+
+### Changed
+- **TURN relay fallback is now OFF by default** (opt-in), matching the serverless ethos —
+  media never traverses a relay unless explicitly enabled. (Currently moot anyway: prod is
+  STUN-only, no coturn deployed.)
+
 ## v0.1.14 — 2026-06-08
 
 ### Added

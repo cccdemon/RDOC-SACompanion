@@ -106,7 +106,7 @@ async fn connect(
     relay_enabled: Option<bool>,
 ) -> Result<(), String> {
     // ── Rust-side validation (never trust the webview) ──────────────────────
-    let relay_enabled = relay_enabled.unwrap_or(true);
+    let relay_enabled = relay_enabled.unwrap_or(false);
     let server = server.trim().to_string();
     if !companion_core::signaling::server_url_ok(&server) {
         return Err("invalid server URL — use wss:// or loopback ws://".into());

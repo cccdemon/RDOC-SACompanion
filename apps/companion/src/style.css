@@ -211,3 +211,7 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 .setshead { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; background: #0f1320; padding: .2rem 0 .4rem; margin-bottom: .2rem; border-bottom: 1px solid #1e293b; z-index: 1; }
 .setshead .x { background: none; border: none; color: #9aa3ad; font-size: 1.2rem; cursor: pointer; line-height: 1; }
 .setshead .x:hover { color: #e2e8f0; }
+
+/* Settings as a modal overlay (closable regardless of page scroll) */
+.settings-overlay { position: fixed; inset: 0; background: rgba(2,6,16,.7); display: flex; align-items: flex-start; justify-content: center; padding: 4vh 1rem; z-index: 50; overflow: auto; }
+.settings { max-height: 88vh; overflow-y: auto; width: min(34rem, 100%); background: #0f1320; border: 1px solid #1e293b; border-radius: 10px; padding: 1rem 1.1rem; box-shadow: 0 10px 40px rgba(0,0,0,.5); }

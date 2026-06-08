@@ -138,9 +138,9 @@ export default function App() {
   });
   const [relayFb, setRelayFb] = useState<boolean>(() => {
     try {
-      return localStorage.getItem("sa.relayFallback") !== "0"; // default on
+      return localStorage.getItem("sa.relayFallback") === "1"; // default OFF (serverless)
     } catch {
-      return true;
+      return false;
     }
   });
   const [update, setUpdate] = useState<{ version: string; notes: string } | null>(null);
@@ -295,14 +295,25 @@ export default function App() {
     (async () => {
       try {
         const cur = await getVersion();
-        const r = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=5`, {
+        const r = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=30`, {
           headers: { Accept: "application/vnd.github+json" },
         });
         const rels = await r.json();
-        const latest = Array.isArray(rels) ? rels.find((x: { draft?: boolean }) => !x.draft) : null;
-        const lv: string | undefined = latest?.tag_name?.match(/(\d+\.\d+\.\d+)/)?.[1];
+        if (!Array.isArray(rels)) return;
+        // The REST /releases order (created_at) is unreliable for force-pushed
+        // tags — pick the highest semver ourselves instead of trusting [0].
+        let lv: string | undefined;
+        let body = "";
+        for (const x of rels as { draft?: boolean; tag_name?: string; body?: string }[]) {
+          if (x.draft) continue;
+          const v = x.tag_name?.match(/(\d+\.\d+\.\d+)/)?.[1];
+          if (v && (!lv || isNewer(v, lv))) {
+            lv = v;
+            body = x.body || "";
+          }
+        }
         if (!lv || !isNewer(lv, cur)) return;
-        let notes: string = latest.body || "";
+        let notes: string = body;
         try {
           const cl = await fetch(`https://raw.githubusercontent.com/${REPO}/main/CHANGELOG.md`);
           notes = topChangelogSection(await cl.text()) || notes;
@@ -439,6 +450,12 @@ export default function App() {
   };
 
   const deviceSettings = (
+    <div
+      className="settings-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) setShowSettings(false);
+      }}
+    >
     <div className="settings">
       <div className="setshead">
         <b>Einstellungen</b>
@@ -526,6 +543,7 @@ export default function App() {
           <span className="vval">{Math.round(dsp.limiter_ceiling * 100)}%</span>
         </div>
       </div>
+    </div>
     </div>
   );
   const rotatedAt = keyInfo.at

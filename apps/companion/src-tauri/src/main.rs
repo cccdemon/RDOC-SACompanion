@@ -279,6 +279,14 @@ fn disconnect(state: State<AppState>) {
     *state.serverless.lock().unwrap() = None;
 }
 
+/// Open the public download page in the system browser (for the update prompt).
+#[tauri::command]
+fn open_download() {
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", "", "https://squadlink.raumdock.org/download/"])
+        .spawn();
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState { engine: Mutex::new(None), serverless: Mutex::new(None) })
@@ -303,6 +311,7 @@ fn main() {
             set_dsp,
             set_monitor,
             disconnect,
+            open_download,
             set_ptt_binding,
             start_ptt_capture
         ])

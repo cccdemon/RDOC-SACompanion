@@ -2,6 +2,13 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.10 — 2026-06-08
+
+### Added
+- **Update checker**: on launch the app compares the running version against the
+  newest GitHub release (prereleases included) and, if newer, shows a banner with
+  the **changelog** + a "Herunterladen" button (opens the download page). Dismissable.
+
 ## v0.1.9 — 2026-06-08
 
 ### Fixed

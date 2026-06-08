@@ -1,7 +1,28 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
 import logo from "./Squad_Link_Lite.png";
+
+const REPO = "cccdemon/RDOC-SquadLinkLite";
+
+// Parse "0.1.10" → [0,1,10]; true if `a` is a newer version than `b`.
+function isNewer(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  }
+  return false;
+}
+
+// Newest CHANGELOG section: from the first "## " heading to the next one.
+function topChangelogSection(md: string): string {
+  const start = md.indexOf("## ");
+  if (start < 0) return "";
+  const next = md.indexOf("\n## ", start + 3);
+  return md.slice(start, next < 0 ? undefined : next).trim();
+}
 
 // Friendly label for raw rdev codes (e.g. "F8", "KeyR", "Mouse:Unknown(1)").
 function pttLabel(code: string): string {
@@ -108,6 +129,8 @@ export default function App() {
     }
   });
   const [monitoring, setMonitoring] = useState(false);
+  const [update, setUpdate] = useState<{ version: string; notes: string } | null>(null);
+  const [showUpdate, setShowUpdate] = useState(true);
   const [pttBinding, setPttBinding] = useState<string>(() => {
     try {
       return localStorage.getItem("sa.ptt") || "F8";
@@ -240,6 +263,34 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Update check: compare the newest GitHub release (prereleases included) to the
+  // running version; if newer, surface it with the changelog.
+  useEffect(() => {
+    (async () => {
+      try {
+        const cur = await getVersion();
+        const r = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=5`, {
+          headers: { Accept: "application/vnd.github+json" },
+        });
+        const rels = await r.json();
+        const latest = Array.isArray(rels) ? rels.find((x: { draft?: boolean }) => !x.draft) : null;
+        const lv: string | undefined = latest?.tag_name?.match(/(\d+\.\d+\.\d+)/)?.[1];
+        if (!lv || !isNewer(lv, cur)) return;
+        let notes: string = latest.body || "";
+        try {
+          const cl = await fetch(`https://raw.githubusercontent.com/${REPO}/main/CHANGELOG.md`);
+          notes = topChangelogSection(await cl.text()) || notes;
+        } catch {
+          /* fall back to release body */
+        }
+        setUpdate({ version: lv, notes });
+        setShowUpdate(true);
+      } catch {
+        /* offline / API error: silently skip */
+      }
+    })();
+  }, []);
+
   // Push saved DSP settings to the engine once connected.
   useEffect(() => {
     if (connected) invoke("set_dsp", { cfg: dsp }).catch(() => {});
@@ -430,9 +481,25 @@ export default function App() {
     </div>
   );
 
+  const updateBanner =
+    update && showUpdate ? (
+      <div className="updbar">
+        <div className="updhead">
+          <b>⬆ Neue Version {update.version} verfügbar</b>
+          <button className="x" title="Schließen" onClick={() => setShowUpdate(false)}>×</button>
+        </div>
+        <pre className="updnotes">{update.notes}</pre>
+        <div className="updact">
+          <button className="btn primary" onClick={() => invoke("open_download").catch(() => {})}>Herunterladen</button>
+          <button className="btn" onClick={() => setShowUpdate(false)}>Später</button>
+        </div>
+      </div>
+    ) : null;
+
   if (!connected) {
     return (
       <div className="screen center">
+        {updateBanner}
         <div className="card connect">
           <div className="brandrow">
             <div className="brandwrap">
@@ -497,6 +564,7 @@ export default function App() {
         <button className="gear" title="Audio-Einstellungen" onClick={() => setShowSettings((s) => !s)}>⚙</button>
         <button className="leave" title="Session verlassen" onClick={onDisconnect}>Verlassen</button>
       </header>
+      {updateBanner}
       {showSettings && deviceSettings}
 
       {!sigUp && (

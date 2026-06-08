@@ -195,3 +195,10 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 /* Leave/disconnect button */
 .leave { background: #3a1620; color: #ffd0d8; border: 1px solid #6b2436; border-radius: 6px; padding: .3rem .7rem; font-size: .8rem; cursor: pointer; margin-left: .4rem; }
 .leave:hover { background: #4a1c2a; }
+
+/* Update notice */
+.updbar { background: #10233a; border: 1px solid #265a86; border-radius: 8px; padding: .6rem .8rem; margin: 0 0 .8rem; color: #dbeafe; }
+.updhead { display: flex; justify-content: space-between; align-items: center; }
+.updhead .x { background: none; border: none; color: #9aa3ad; font-size: 1.1rem; cursor: pointer; }
+.updnotes { max-height: 11rem; overflow: auto; background: rgba(0,0,0,.3); border-radius: 6px; padding: .5rem .6rem; margin: .5rem 0; font-size: .78rem; white-space: pre-wrap; line-height: 1.4; }
+.updact { display: flex; gap: .5rem; }

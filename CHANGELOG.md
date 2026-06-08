@@ -1,0 +1,66 @@
+# Changelog
+
+All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
+
+## v0.1.6 — 2026-06-08
+
+### Added
+- **On-demand session key rotation.** Button "🔑 Key rotieren" triggers a room-wide
+  DTLS-SRTP re-handshake (new keys on every link). Protocol `ClientMsg::Rekey` →
+  server broadcast `ServerMsg::Rekey` → `mesh.rekey()`. UI shows the current key
+  generation + last-rotation time in the encryption footer (`UiEvent::Rekeyed`).
+
+## v0.1.5 — 2026-06-08
+
+### Security
+- **Loopback detection** now parses the URL host instead of substring-matching
+  (`ws://` only to `localhost`/`127.0.0.1`/`::1`); added `signaling::server_url_ok`
+  + unit tests (incl. `ws://evil.example/127.0.0.1`).
+- **Tauri CSP** set to a strict policy (was `null`): self + `squadlink.raumdock.org`
+  (https/wss) + IPC, no wildcards.
+- **Tauri command input validation** (server URL, room/user_id/name/token/cert_sha256,
+  chat length, volume clamp, PTT code) with clean `Result` errors.
+- **InitConnection hardening:** 64 KB WS frame cap, length caps on room/user_id/name/SDP/ICE,
+  REST body limit, bounded per-peer channels (backpressure), per-IP rate limits on
+  `/session` and the PIN join (on top of per-code `MAX_ATTEMPTS`).
+- **Auth fail-closed:** missing `ROOM_AUTH_SECRET` aborts startup unless `ALLOW_OPEN_AUTH=1`
+  (dev only). Production now runs in HMAC mode.
+- **Dependencies/CI:** Vite 6 + esbuild 0.25 (override); CI uses `--frozen-lockfile` and runs
+  `pnpm audit` + `cargo audit`.
+
+## v0.1.4 — 2026-06-08
+
+### Added
+- Public web surface served by InitConnection: `/` (what-is + links to raumdock.org,
+  Fleetmanager, GitHub), `/privacy`, `/legal`, `/license`.
+- **PolyForm Noncommercial License 1.0.0** (`LICENSE`); authors head87x & justcallmedeimos;
+  commercial-use clause + contact `commercialusage@raumdock.org`.
+- App icon + in-app logo generated from `Squad_Link_Lite.png` (CI `tauri icon`).
+
+### Changed
+- Repository renamed to `cccdemon/RDOC-SquadLinkLite` (GITHUB_URL + installer pull updated).
+
+## v0.1.3 — 2026-06-08
+
+### Added
+- **Configurable RAW push-to-talk** (any key or mouse button via `rdev`), rebind via the
+  gear menu; binding persisted.
+- **Live bandwidth**: real WebRTC transport-stats polling → measured up/down kbps + peer count.
+- **Audio compressor** in the capture path (RNNoise noise-suppression already on by default).
+
+### Changed
+- Volume sliders are 0–100 % (100 = unity), no longer 0–200.
+
+## v0.1.2 — 2026-06-07
+
+### Added
+- Master + per-participant output volume; audio device selection behind a gear icon.
+- In-session share panel (code + link + PIN stay visible to the host).
+- Encryption footer.
+
+### Changed
+- Session-only UI (removed Server/Serverless tabs); chat shows display names, not raw ids.
+
+### Fixed
+- Session persistence: a session now lives while its room has members (5-min grace after
+  empty, 24 h hard cap), instead of a fixed 12 h TTL from creation.

@@ -2,6 +2,11 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.24 — 2026-06-08
+
+### Added
+- Version shown in the footer (both screens) and on the start screen.
+
 ## v0.1.23 — 2026-06-08
 
 ### Fixed

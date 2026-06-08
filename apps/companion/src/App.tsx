@@ -160,6 +160,7 @@ export default function App() {
       return false;
     }
   });
+  const [appVersion, setAppVersion] = useState("");
   const [update, setUpdate] = useState<{ version: string; notes: string } | null>(null);
   const [showUpdate, setShowUpdate] = useState(true);
   const [pttBinding, setPttBinding] = useState<string>(() => {
@@ -338,6 +339,10 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
+
   // Update check: compare the newest GitHub release (prereleases included) to the
   // running version; if newer, surface it with the changelog.
   useEffect(() => {
@@ -655,6 +660,7 @@ export default function App() {
         · Schlüssel-Generation <b>#{keyInfo.gen}</b>
         {rotatedAt ? ` (rotiert ${rotatedAt})` : ""}
       </span>
+      {appVersion && <span className="ver"> · v{appVersion}</span>}
     </div>
   );
 
@@ -685,7 +691,7 @@ export default function App() {
             </div>
             <button className="gear" title="Audio-Einstellungen" onClick={() => setShowSettings((s) => !s)}>⚙</button>
           </div>
-          <div className="sub">P2P Voice + Chat</div>
+          <div className="sub">P2P Voice + Chat{appVersion ? ` · v${appVersion}` : ""}</div>
           {showSettings && deviceSettings}
 
           <label>Name</label>

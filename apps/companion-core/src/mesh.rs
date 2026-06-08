@@ -214,6 +214,15 @@ impl Mesh {
     }
 
     pub async fn on_offer(&mut self, from: &str, sdp: String) -> Result<()> {
+        // A fresh offer for an already-established peer is a renegotiation /
+        // rekey: drop the old PC so ensure() builds a new one with new keys.
+        if let Some(p) = self.peers.get(from) {
+            if p.remote_set.load(Ordering::SeqCst) {
+                if let Some(old) = self.peers.remove(from) {
+                    let _ = old.pc.close().await;
+                }
+            }
+        }
         self.ensure(from).await?;
         let p = self.peers.get(from).unwrap();
         p.pc.set_remote_description(RTCSessionDescription::offer(sdp)?).await?;
@@ -242,6 +251,22 @@ impl Mesh {
         if let Some(p) = self.peers.remove(peer) {
             let _ = p.pc.close().await;
         }
+    }
+
+    /// Room-wide key rotation: tear down every PeerConnection and re-handshake,
+    /// yielding fresh DTLS-SRTP keys on every link. Re-offers follow the same
+    /// glare rule (smaller user_id offers); the answerer rebuilds in on_offer.
+    pub async fn rekey(&mut self) -> Result<()> {
+        let ids: Vec<String> = self.peers.keys().cloned().collect();
+        for id in &ids {
+            if let Some(old) = self.peers.remove(id) {
+                let _ = old.pc.close().await;
+            }
+        }
+        for id in &ids {
+            self.on_peer(id).await?;
+        }
+        Ok(())
     }
 
     /// Sum transport bytes (sent, received) across all peer connections.

@@ -607,6 +607,20 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     }
                 }
             }
+            ClientMsg::Rekey => {
+                // Broadcast a key-rotation request to the whole room (incl. the
+                // initiator) so every client re-handshakes together.
+                if let Some((room, from)) = &me {
+                    let rooms = state.rooms.lock().unwrap();
+                    if let Some(r) = rooms.get(room) {
+                        let by = r.get(from).map(|h| h.name.clone()).unwrap_or_default();
+                        for h in r.values() {
+                            let _ = h.tx.try_send(ServerMsg::Rekey { by: by.clone() });
+                        }
+                    }
+                    tracing::info!(%room, %from, "rekey");
+                }
+            }
             ClientMsg::Leave => break,
         }
     }

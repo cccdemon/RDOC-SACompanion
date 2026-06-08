@@ -50,6 +50,9 @@ pub enum ClientMsg {
     Ice { to: String, candidate: String },
     /// Speaking-state for the roster (optional UX).
     Ptt { active: bool },
+    /// Request a room-wide key rotation: every peer tears down + re-handshakes
+    /// its connections, yielding fresh DTLS-SRTP keys. Server broadcasts it.
+    Rekey,
     Leave,
 }
 
@@ -67,6 +70,8 @@ pub enum ServerMsg {
     Answer { from: String, sdp: String },
     Ice { from: String, candidate: String },
     Ptt { user_id: String, active: bool },
+    /// A peer requested a key rotation; all clients re-handshake. `by` = name.
+    Rekey { by: String },
     /// Join refused — room at hard cap.
     RoomFull { cap: usize },
     /// Soft cap reached: client should show a quality-warning banner.

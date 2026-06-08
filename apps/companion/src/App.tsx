@@ -28,7 +28,8 @@ type UiEvent =
   | { type: "chat"; from: string; text: string }
   | { type: "status"; connected: boolean; transmitting: boolean }
   | { type: "log"; text: string }
-  | { type: "net"; peers: number; up_kbps: number; down_kbps: number };
+  | { type: "net"; peers: number; up_kbps: number; down_kbps: number }
+  | { type: "rekeyed"; generation: number; by: string };
 
 export default function App() {
   const [connected, setConnected] = useState(false);
@@ -69,6 +70,8 @@ export default function App() {
   const [masterVol, setMasterVol] = useState(100); // percent
   const [peerVol, setPeerVol] = useState<Record<string, number>>({});
   const [net, setNet] = useState<{ peers: number; up: number; down: number } | null>(null);
+  const [keyInfo, setKeyInfo] = useState<{ gen: number; at: number }>({ gen: 1, at: 0 });
+  const [rotating, setRotating] = useState(false);
   const [pttBinding, setPttBinding] = useState<string>(() => {
     try {
       return localStorage.getItem("sa.ptt") || "F8";
@@ -112,6 +115,11 @@ export default function App() {
         if (p.connected) setConnecting(false);
       } else if (p.type === "log") setLog(p.text);
       else if (p.type === "net") setNet({ peers: p.peers, up: p.up_kbps, down: p.down_kbps });
+      else if (p.type === "rekeyed") {
+        setKeyInfo({ gen: p.generation, at: Date.now() });
+        setRotating(false);
+        setLog(`🔑 Schlüssel rotiert (Generation #${p.generation}${p.by ? `, durch ${p.by}` : ""})`);
+      }
     });
     return () => {
       un.then((f) => f());
@@ -147,6 +155,12 @@ export default function App() {
   const rebindPtt = () => {
     setCapturing(true);
     invoke("start_ptt_capture").catch(() => {});
+  };
+  const rotateKey = () => {
+    setRotating(true);
+    invoke("rotate_key").catch(() => setRotating(false));
+    // safety: clear the spinner even if no rekeyed event arrives
+    setTimeout(() => setRotating(false), 8000);
   };
 
   const copy = (t: string) => navigator.clipboard?.writeText(t);
@@ -256,10 +270,17 @@ export default function App() {
       </div>
     </div>
   );
+  const rotatedAt = keyInfo.at
+    ? new Date(keyInfo.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : null;
   const encFooter = (
     <div className="encfoot">
       🔒 Encryption: <b>DTLS-SRTP</b> (Audio) · <b>DTLS-SCTP</b> (Chat) · <b>TLS/wss</b> (Signaling)
       — Ende-zu-Ende P2P, encrypted by default &amp; by session
+      <span className="keygen">
+        · Schlüssel-Generation <b>#{keyInfo.gen}</b>
+        {rotatedAt ? ` (rotiert ${rotatedAt})` : ""}
+      </span>
     </div>
   );
 
@@ -336,6 +357,14 @@ export default function App() {
         <span>↑ {measured ? "" : "~"}{up} kbps</span>
         <span>↓ {measured ? "" : "~"}{down} kbps</span>
         <span className="netest">({measured ? "gemessen" : "geschätzt"})</span>
+        <button
+          className="rekey"
+          title="Erzeugt für alle Teilnehmer neue Verschlüsselungs-Keys (DTLS-SRTP re-handshake)"
+          onClick={rotateKey}
+          disabled={rotating}
+        >
+          {rotating ? "⏳ Rotiere…" : `🔑 Key rotieren · #${keyInfo.gen}`}
+        </button>
       </div>
 
       <div className="volrow">

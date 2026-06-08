@@ -243,6 +243,13 @@ fn list_audio_devices() -> (Vec<String>, Vec<String>) {
     companion_core::audio::list_devices()
 }
 
+#[tauri::command]
+fn rotate_key(state: State<AppState>) {
+    if let Some(e) = state.engine.lock().unwrap().as_ref() {
+        e.rotate_key();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState { engine: Mutex::new(None), serverless: Mutex::new(None) })
@@ -262,6 +269,7 @@ fn main() {
             set_master_volume,
             set_peer_volume,
             list_audio_devices,
+            rotate_key,
             set_ptt_binding,
             start_ptt_capture
         ])

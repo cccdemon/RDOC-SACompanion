@@ -166,3 +166,9 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 /* App logo on connect screen */
 .brandwrap { display: flex; align-items: center; gap: .55rem; }
 .applogo { width: 34px; height: 34px; border-radius: 7px; }
+
+/* Key rotation */
+.netbar .rekey { margin-left: auto; background: #1a2535; color: #cfe3ff; border: 1px solid #2b3f5c; border-radius: 6px; padding: .25rem .55rem; font-size: .8rem; cursor: pointer; }
+.netbar .rekey:hover:not(:disabled) { background: #213149; }
+.netbar .rekey:disabled { opacity: .6; cursor: default; }
+.encfoot .keygen { color: #8fb6ff; }

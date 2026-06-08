@@ -49,6 +49,8 @@ pub enum UiEvent {
     Log { text: String },
     /// Live network: connected peer count + measured up/down kbps.
     Net { peers: usize, up_kbps: u32, down_kbps: u32 },
+    /// Encryption keys rotated: fresh DTLS-SRTP keys negotiated across the mesh.
+    Rekeyed { generation: u32, by: String },
 }
 
 pub type Sink = Arc<dyn Fn(UiEvent) + Send + Sync>;
@@ -74,6 +76,7 @@ enum Cmd {
     ToggleTx,
     SetTx(bool),
     Chat(String),
+    Rekey,
 }
 
 /// Handle to the running engine; methods are non-blocking.
@@ -91,6 +94,11 @@ impl Engine {
     }
     pub fn send_chat(&self, text: String) {
         let _ = self.cmd_tx.send(Cmd::Chat(text));
+    }
+    /// Rotate the session encryption keys: triggers a room-wide DTLS-SRTP
+    /// re-handshake so all links get fresh keys.
+    pub fn rotate_key(&self) {
+        let _ = self.cmd_tx.send(Cmd::Rekey);
     }
     /// Overall output volume (0.0 mute … 1.0 normal … 2.0 +6 dB). Live.
     pub fn set_master_volume(&self, v: f32) {
@@ -239,6 +247,7 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
     let me_name = cfg.name.clone();
     tokio::spawn(async move {
         let mut members: HashMap<String, Member> = HashMap::new();
+        let mut key_gen: u32 = 1; // generation #1 = the initial DTLS-SRTP keys
         let mut net_iv = tokio::time::interval(Duration::from_secs(2));
         let mut last_bytes = (0u64, 0u64);
         let mut last_inst = std::time::Instant::now();
@@ -288,6 +297,11 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                             if let Some(m) = members.get_mut(&user_id) { m.speaking = active; }
                             emit_roster(&sink, &members, &me_id, &me_name, transmit.load(Ordering::SeqCst));
                         }
+                        ServerMsg::Rekey { by } => {
+                            let _ = mesh.rekey().await;
+                            key_gen = key_gen.saturating_add(1);
+                            sink(UiEvent::Rekeyed { generation: key_gen, by });
+                        }
                         ServerMsg::Turn(t) => { mesh.add_turn(t.urls, t.username, t.credential); }
                         ServerMsg::Warn { size, cap } => { sink(UiEvent::Log { text: format!("Room {size}/{cap} — Audioqualität kann leiden") }); }
                         ServerMsg::RoomFull { cap } => { sink(UiEvent::Log { text: format!("Room voll @ {cap}") }); break; }
@@ -328,6 +342,10 @@ pub async fn start(cfg: EngineConfig, sink: Sink) -> Result<Engine> {
                         Some(Cmd::Chat(t)) => {
                             mesh.broadcast_chat(&t).await;
                             sink(UiEvent::Chat { from: me_name.clone(), text: t });
+                        }
+                        Some(Cmd::Rekey) => {
+                            // Broadcast → everyone (incl. us) rekeys on the echoed Rekey.
+                            let _ = out.send(ClientMsg::Rekey);
                         }
                         None => break,
                     }

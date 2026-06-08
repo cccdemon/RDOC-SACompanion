@@ -24,6 +24,17 @@ function topChangelogSection(md: string): string {
   return md.slice(start, next < 0 ? undefined : next).trim();
 }
 
+// Render markdown release notes as readable plain text.
+function mdToText(s: string): string {
+  return s
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "• ")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/`/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 // Friendly label for raw rdev codes (e.g. "F8", "KeyR", "Mouse:Unknown(1)").
 function pttLabel(code: string): string {
   if (code.startsWith("Mouse:")) {
@@ -374,7 +385,7 @@ export default function App() {
         } catch {
           /* fall back to release body */
         }
-        setUpdate({ version: lv, notes });
+        setUpdate({ version: lv, notes: mdToText(notes) });
         setShowUpdate(true);
       } catch {
         /* offline / API error: silently skip */
@@ -671,7 +682,7 @@ export default function App() {
           <b>⬆ Neue Version {update.version} verfügbar</b>
           <button className="x" title="Schließen" onClick={() => setShowUpdate(false)}>×</button>
         </div>
-        <pre className="updnotes">{update.notes}</pre>
+        <div className="updnotes">{update.notes}</div>
         <div className="updact">
           <button className="btn primary" onClick={() => invoke("open_download").catch(() => {})}>Herunterladen</button>
           <button className="btn" onClick={() => setShowUpdate(false)}>Später</button>

@@ -2,6 +2,11 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.25 — 2026-06-08
+
+### Fixed
+- Update banner now renders the changelog as clean plain text (no raw Markdown markers).
+
 ## v0.1.24 — 2026-06-08
 
 ### Added

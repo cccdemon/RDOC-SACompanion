@@ -53,6 +53,9 @@ async fn main() -> Result<()> {
             println!("[status verbunden={connected} senden={transmitting}]")
         }
         UiEvent::Log { text } => println!("[log] {text}"),
+        UiEvent::Net { peers, up_kbps, down_kbps } => {
+            println!("[net peers={peers} up={up_kbps}kbps down={down_kbps}kbps]")
+        }
     });
 
     let engine = Arc::new(start(cfg, sink).await?);

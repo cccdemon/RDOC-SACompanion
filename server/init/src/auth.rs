@@ -14,10 +14,24 @@ pub enum AuthConfig {
 }
 
 impl AuthConfig {
-    pub fn from_env() -> Self {
+    /// Build from env, FAIL-CLOSED: Open mode is only allowed when explicitly
+    /// opted into via `ALLOW_OPEN_AUTH=1` (dev). Otherwise a missing
+    /// `ROOM_AUTH_SECRET` is a hard error so production never silently runs open.
+    pub fn from_env() -> Result<Self, String> {
         match std::env::var("ROOM_AUTH_SECRET") {
-            Ok(s) if !s.is_empty() => Self::Hmac(s.into_bytes()),
-            _ => Self::Open,
+            Ok(s) if !s.is_empty() => Ok(Self::Hmac(s.into_bytes())),
+            _ => {
+                let allow_open = std::env::var("ALLOW_OPEN_AUTH")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                if allow_open {
+                    Ok(Self::Open)
+                } else {
+                    Err("ROOM_AUTH_SECRET is not set — refusing to start in OPEN auth mode. \
+Set ROOM_AUTH_SECRET=<secret> for production, or ALLOW_OPEN_AUTH=1 for local dev only."
+                        .into())
+                }
+            }
         }
     }
 

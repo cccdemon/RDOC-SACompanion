@@ -7,7 +7,9 @@
 # Deploy on LXC 103 (10.10.10.99):
 #   cd /opt/RDOC-SACompanion && git pull
 #   docker compose -f deploy/docker-compose.proxy.yml up -d --build
-# .env needs: ROOM_AUTH_SECRET (stable HMAC secret for room join tokens).
+# .env MUST set ROOM_AUTH_SECRET (stable HMAC secret for room join tokens).
+# The server is FAIL-CLOSED: with no ROOM_AUTH_SECRET it refuses to start unless
+# ALLOW_OPEN_AUTH=1 is set (dev only). Generate once: openssl rand -hex 32.
 
 services:
   init:

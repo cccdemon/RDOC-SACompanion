@@ -23,8 +23,40 @@ pub struct Signaling {
     pub incoming: mpsc::UnboundedReceiver<ServerMsg>,
 }
 
+/// Extract the lowercased host from a ws(s):// URL (no deps). Handles
+/// `user@host:port`, `[::1]:port`, trailing path. Returns None if malformed.
+pub fn url_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let hostport = authority.rsplit('@').next()?; // drop userinfo
+    let host = if let Some(after) = hostport.strip_prefix('[') {
+        after.split(']').next()? // [ipv6]
+    } else {
+        hostport.split(':').next()? // host:port
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some(host.to_ascii_lowercase())
+}
+
+/// True only when the URL's HOST is exactly a loopback address — parsed, not
+/// substring-matched (so `ws://evil.example/127.0.0.1` is NOT loopback).
 fn is_loopback(url: &str) -> bool {
-    url.contains("127.0.0.1") || url.contains("//localhost") || url.contains("[::1]")
+    matches!(url_host(url).as_deref(), Some("localhost") | Some("127.0.0.1") | Some("::1"))
+}
+
+/// Acceptable signaling endpoint policy (shared with the Tauri command layer):
+/// `wss://` to any valid host, or `ws://` only to a loopback host.
+pub fn server_url_ok(url: &str) -> bool {
+    let u = url.trim();
+    if let Some(stripped) = u.strip_prefix("wss://") {
+        !stripped.is_empty() && url_host(u).is_some()
+    } else if u.starts_with("ws://") {
+        is_loopback(u)
+    } else {
+        false
+    }
 }
 
 /// Verifier that trusts exactly one cert, matched by its SHA-256 fingerprint.
@@ -138,4 +170,48 @@ pub async fn connect(url: &str, cert_sha256: Option<&str>) -> Result<Signaling> 
     });
 
     Ok(Signaling { out: out_tx, incoming: in_rx })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_loopback, server_url_ok, url_host};
+
+    #[test]
+    fn server_policy() {
+        assert!(server_url_ok("wss://squadlink.raumdock.org/ws"));
+        assert!(server_url_ok("ws://127.0.0.1:8080/ws"));
+        assert!(server_url_ok("ws://localhost:8080/ws"));
+        assert!(!server_url_ok("ws://evil.example/ws")); // plain ws, non-loopback
+        assert!(!server_url_ok("ws://evil.example/127.0.0.1")); // spoof
+        assert!(!server_url_ok("http://squadlink.raumdock.org")); // wrong scheme
+        assert!(!server_url_ok("wss://")); // empty host
+    }
+
+    #[test]
+    fn host_parsing() {
+        assert_eq!(url_host("ws://127.0.0.1:8080/ws").as_deref(), Some("127.0.0.1"));
+        assert_eq!(url_host("wss://squadlink.raumdock.org/ws").as_deref(), Some("squadlink.raumdock.org"));
+        assert_eq!(url_host("ws://[::1]:8080/ws").as_deref(), Some("::1"));
+        assert_eq!(url_host("wss://user@Host.Example:443/x").as_deref(), Some("host.example"));
+        // host is evil.example, NOT the loopback string in the path
+        assert_eq!(url_host("ws://evil.example/127.0.0.1").as_deref(), Some("evil.example"));
+    }
+
+    #[test]
+    fn loopback_allowed_hosts() {
+        assert!(is_loopback("ws://127.0.0.1:8080/ws"));
+        assert!(is_loopback("ws://localhost:8080/ws"));
+        assert!(is_loopback("ws://[::1]:8080/ws"));
+        assert!(is_loopback("ws://LOCALHOST/ws")); // case-insensitive
+    }
+
+    #[test]
+    fn loopback_rejects_spoofed() {
+        // The security finding: path/userinfo containing 127.0.0.1 must NOT pass.
+        assert!(!is_loopback("ws://evil.example/127.0.0.1"));
+        assert!(!is_loopback("ws://127.0.0.1.evil.example/ws"));
+        assert!(!is_loopback("ws://localhost.evil.example/ws"));
+        assert!(!is_loopback("ws://127.0.0.1@evil.example/ws"));
+        assert!(!is_loopback("wss://squadlink.raumdock.org/ws"));
+    }
 }

@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
@@ -47,9 +47,72 @@ fn public_ws() -> String {
 const WARN_CAP: usize = 12;
 const HARD_CAP: usize = 16;
 
+// ── Input limits (defense against oversized/abusive frames) ──────────────────
+const MAX_WS_MSG: usize = 64 * 1024; // whole WS text frame
+const MAX_REST_BODY: usize = 4 * 1024; // REST JSON body
+const MAX_ID: usize = 64; // room / user_id
+const MAX_NAME: usize = 64;
+const MAX_TOKEN: usize = 128;
+const MAX_SDP: usize = 16 * 1024;
+const MAX_ICE: usize = 4 * 1024;
+const MAX_CODE: usize = 32;
+const MAX_PIN: usize = 12;
+/// Per-peer outbound queue depth before backpressure drops signaling messages.
+const PEER_CHAN: usize = 256;
+
+fn len_ok(s: &str, max: usize) -> bool {
+    !s.is_empty() && s.len() <= max
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+// ── Per-IP rate limiting (fixed window) against session/PIN bruteforce ───────
+const RL_WINDOW: u64 = 300; // 5 min
+const RL_JOIN_MAX: u32 = 30; // PIN tries per IP per window
+const RL_CREATE_MAX: u32 = 20; // session creations per IP per window
+
+#[derive(Default)]
+struct RateLimiter {
+    inner: Mutex<HashMap<String, (u64, u32)>>, // ip -> (window_start, count)
+}
+impl RateLimiter {
+    /// Returns true if allowed, false if the IP exceeded `max` in `window`.
+    fn allow(&self, ip: &str, max: u32, window: u64) -> bool {
+        let now = now_secs();
+        let mut m = self.inner.lock().unwrap();
+        let e = m.entry(ip.to_string()).or_insert((now, 0));
+        if now.saturating_sub(e.0) >= window {
+            *e = (now, 0);
+        }
+        e.1 += 1;
+        e.1 <= max
+    }
+    fn prune(&self, window: u64) {
+        let now = now_secs();
+        self.inner.lock().unwrap().retain(|_, (start, _)| now.saturating_sub(*start) < window);
+    }
+}
+
+/// Best-effort client IP: first hop of X-Forwarded-For (set by our reverse
+/// proxy), else a constant bucket. Good enough for coarse abuse throttling.
+fn client_ip(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".into())
+}
+
 struct PeerHandle {
     name: String,
-    tx: mpsc::UnboundedSender<ServerMsg>,
+    tx: mpsc::Sender<ServerMsg>,
 }
 
 type Room = HashMap<String, PeerHandle>; // user_id -> handle
@@ -59,6 +122,7 @@ struct AppState {
     auth: AuthConfig,
     turn: Option<TurnConfig>,
     sessions: Sessions,
+    rate: RateLimiter,
 }
 
 #[tokio::main]
@@ -70,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let auth = AuthConfig::from_env();
+    let auth = AuthConfig::from_env().map_err(|e| anyhow::anyhow!(e))?;
 
     // `mint <room>` helper: print the join token for a room and exit.
     let args: Vec<String> = std::env::args().collect();
@@ -78,13 +142,13 @@ async fn main() -> anyhow::Result<()> {
         let room = args.get(2).cloned().unwrap_or_default();
         match auth.token_for(&room) {
             Some(t) => println!("{t}"),
-            None => eprintln!("ROOM_AUTH_SECRET not set — open mode, no token needed"),
+            None => eprintln!("ALLOW_OPEN_AUTH set — open mode, no token needed"),
         }
         return Ok(());
     }
 
     if matches!(auth, AuthConfig::Open) {
-        tracing::warn!("ROOM_AUTH_SECRET unset — OPEN mode, any client may join any room (dev only)");
+        tracing::warn!("ALLOW_OPEN_AUTH set — OPEN mode, any client may join any room (dev only)");
     }
     let turn = TurnConfig::from_env();
     tracing::info!("TURN minting: {}", if turn.is_some() { "enabled" } else { "disabled" });
@@ -94,6 +158,7 @@ async fn main() -> anyhow::Result<()> {
         auth,
         turn,
         sessions: Sessions::default(),
+        rate: RateLimiter::default(),
     });
 
     // Session lifecycle: keep a session alive while its room has members,
@@ -107,6 +172,7 @@ async fn main() -> anyhow::Result<()> {
                 state.sessions.reap(|room| {
                     state.rooms.lock().unwrap().get(room).map(|r| !r.is_empty()).unwrap_or(false)
                 });
+                state.rate.prune(RL_WINDOW);
             }
         });
     }
@@ -122,6 +188,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/session", post(create_session))
         .route("/session/:code/join", post(join_session))
         .route("/j/:code", get(landing))
+        .layer(DefaultBodyLimit::max(MAX_REST_BODY))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -156,11 +223,19 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+    ws.max_message_size(MAX_WS_MSG)
+        .max_frame_size(MAX_WS_MSG)
+        .on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 /// Host creates a session → random room + token + 6-digit PIN + share code.
-async fn create_session(State(state): State<Arc<AppState>>) -> Response {
+async fn create_session(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if !state.rate.allow(&client_ip(&headers), RL_CREATE_MAX, RL_WINDOW) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "rate_limited" }))).into_response();
+    }
     let (code, pin, room, token) = state.sessions.create(|r| state.auth.token_for(r));
     let base = public_base();
     tracing::info!(%code, %room, "session created");
@@ -179,9 +254,17 @@ async fn create_session(State(state): State<Arc<AppState>>) -> Response {
 async fn join_session(
     State(state): State<Arc<AppState>>,
     Path(code): Path<String>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Response {
+    if !state.rate.allow(&client_ip(&headers), RL_JOIN_MAX, RL_WINDOW) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "rate_limited" }))).into_response();
+    }
     let pin = body.get("pin").and_then(|v| v.as_str()).unwrap_or("");
+    // Bound code/PIN lengths before touching the session store.
+    if !len_ok(&code, MAX_CODE) || !len_ok(pin, MAX_PIN) {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response();
+    }
     match state.sessions.join(&code, pin) {
         Ok((room, token)) => {
             Json(json!({ "room": room, "token": token, "ws": public_ws() })).into_response()
@@ -384,7 +467,8 @@ oder Nutzung in umsatzgenerierenden Aktivitäten.</p>
 
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let (mut sink, mut stream) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
+    // Bounded: a slow/stuck peer applies backpressure instead of growing memory.
+    let (tx, mut rx) = mpsc::channel::<ServerMsg>(PEER_CHAN);
 
     // Writer task: serialize ServerMsg → WS text frames.
     let writer = tokio::spawn(async move {
@@ -408,7 +492,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         let cmsg: ClientMsg = match serde_json::from_str(&text) {
             Ok(m) => m,
             Err(e) => {
-                let _ = tx.send(ServerMsg::Error { code: "bad_json".into(), message: e.to_string() });
+                let _ = tx.try_send(ServerMsg::Error { code: "bad_json".into(), message: e.to_string() });
                 continue;
             }
         };
@@ -416,14 +500,26 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         match cmsg {
             ClientMsg::Join { room, user_id, name, token } => {
                 if me.is_some() {
-                    let _ = tx.send(ServerMsg::Error {
+                    let _ = tx.try_send(ServerMsg::Error {
                         code: "already_joined".into(),
                         message: "this socket already joined a room".into(),
                     });
                     continue;
                 }
+                // Bound all client-supplied fields before doing anything with them.
+                if !len_ok(&room, MAX_ID)
+                    || !len_ok(&user_id, MAX_ID)
+                    || !len_ok(&name, MAX_NAME)
+                    || token.as_deref().map(|t| t.len() > MAX_TOKEN).unwrap_or(false)
+                {
+                    let _ = tx.try_send(ServerMsg::Error {
+                        code: "bad_input".into(),
+                        message: "field empty or too long".into(),
+                    });
+                    break;
+                }
                 if !state.auth.check(&room, token.as_deref()) {
-                    let _ = tx.send(ServerMsg::Error {
+                    let _ = tx.try_send(ServerMsg::Error {
                         code: "bad_token".into(),
                         message: "invalid room token".into(),
                     });
@@ -435,13 +531,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     let r = rooms.entry(room.clone()).or_default();
                     // Cap check (a rejoining same user_id doesn't count as growth).
                     if r.len() >= HARD_CAP && !r.contains_key(&user_id) {
-                        let _ = tx.send(ServerMsg::RoomFull { cap: HARD_CAP });
+                        let _ = tx.try_send(ServerMsg::RoomFull { cap: HARD_CAP });
                         drop(rooms);
                         break;
                     }
                     // Supersede a stale connection with the same user_id.
                     if let Some(old) = r.remove(&user_id) {
-                        let _ = old.tx.send(ServerMsg::Error {
+                        let _ = old.tx.try_send(ServerMsg::Error {
                             code: "superseded".into(),
                             message: "joined from another connection".into(),
                         });
@@ -454,7 +550,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     // Tell existing peers about the newcomer.
                     for (id, h) in r.iter() {
                         if id != &user_id {
-                            let _ = h.tx.send(ServerMsg::PeerJoined {
+                            let _ = h.tx.try_send(ServerMsg::PeerJoined {
                                 user_id: user_id.clone(),
                                 name: name.clone(),
                             });
@@ -464,27 +560,36 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     // Soft-cap warning to everyone in the room.
                     if size >= WARN_CAP {
                         for h in r.values() {
-                            let _ = h.tx.send(ServerMsg::Warn { size, cap: WARN_CAP });
+                            let _ = h.tx.try_send(ServerMsg::Warn { size, cap: WARN_CAP });
                         }
                     }
                     (roster, size)
                 };
 
-                let _ = tx.send(ServerMsg::Roster { peers: roster });
+                let _ = tx.try_send(ServerMsg::Roster { peers: roster });
                 if let Some(turn) = &state.turn {
-                    let _ = tx.send(ServerMsg::Turn(turn.mint(&user_id)));
+                    let _ = tx.try_send(ServerMsg::Turn(turn.mint(&user_id)));
                 }
                 tracing::info!(%room, %user_id, size, "join");
                 me = Some((room, user_id));
             }
 
             ClientMsg::Offer { to, sdp } => {
+                if !len_ok(&to, MAX_ID) || sdp.len() > MAX_SDP {
+                    continue;
+                }
                 relay_to(&state, &me, &to, |from| ServerMsg::Offer { from, sdp });
             }
             ClientMsg::Answer { to, sdp } => {
+                if !len_ok(&to, MAX_ID) || sdp.len() > MAX_SDP {
+                    continue;
+                }
                 relay_to(&state, &me, &to, |from| ServerMsg::Answer { from, sdp });
             }
             ClientMsg::Ice { to, candidate } => {
+                if !len_ok(&to, MAX_ID) || candidate.len() > MAX_ICE {
+                    continue;
+                }
                 relay_to(&state, &me, &to, |from| ServerMsg::Ice { from, candidate });
             }
             ClientMsg::Ptt { active } => {
@@ -493,7 +598,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     if let Some(r) = rooms.get(room) {
                         for (id, h) in r.iter() {
                             if id != from {
-                                let _ = h.tx.send(ServerMsg::Ptt {
+                                let _ = h.tx.try_send(ServerMsg::Ptt {
                                     user_id: from.clone(),
                                     active,
                                 });
@@ -512,7 +617,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         if let Some(r) = rooms.get_mut(&room) {
             r.remove(&user_id);
             for h in r.values() {
-                let _ = h.tx.send(ServerMsg::PeerLeft { user_id: user_id.clone() });
+                let _ = h.tx.try_send(ServerMsg::PeerLeft { user_id: user_id.clone() });
             }
             if r.is_empty() {
                 rooms.remove(&room);
@@ -535,7 +640,7 @@ fn relay_to(
     let rooms = state.rooms.lock().unwrap();
     if let Some(r) = rooms.get(room) {
         if let Some(h) = r.get(to) {
-            let _ = h.tx.send(build(from.clone()));
+            let _ = h.tx.try_send(build(from.clone()));
         }
     }
 }

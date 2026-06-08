@@ -47,10 +47,21 @@ jobs:
         with:
           workspaces: apps/companion/src-tauri -> target
 
-      - name: Install frontend deps
+      - name: Install frontend deps (reproducible)
         working-directory: apps/companion
-        # not --frozen: manifests get edited during prototyping
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit npm dependencies
+        working-directory: apps/companion
+        run: pnpm audit --audit-level moderate
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Rust dependencies
+        working-directory: apps/companion/src-tauri
+        # Report-only: don't block prototype builds on unpatched transitive advisories.
+        run: cargo audit || true
 
       - name: Generate app icons from the SquadLink Lite logo
         working-directory: apps/companion

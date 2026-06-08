@@ -64,6 +64,8 @@ fn start_raw_input() {
 
 #[tauri::command]
 fn set_ptt_binding(code: Option<String>) {
+    // Codes are rdev Debug strings like "F8" / "Mouse:Unknown(1)"; bound length.
+    let code = code.filter(|c| !c.is_empty() && c.len() <= 64);
     *ptt_binding().lock().unwrap() = code;
 }
 
@@ -79,6 +81,16 @@ fn make_sink(app: &AppHandle) -> Sink {
     })
 }
 
+const MAX_CHAT_LEN: usize = 2000;
+
+/// Identifier guard: non-empty, bounded, safe charset.
+fn valid_id(s: &str, max: usize) -> bool {
+    !s.is_empty() && s.len() <= max && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+}
+fn valid_hex(s: &str, max: usize) -> bool {
+    !s.is_empty() && s.len() <= max && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 #[tauri::command]
 async fn connect(
     app: AppHandle,
@@ -92,6 +104,41 @@ async fn connect(
     input_device: Option<String>,
     output_device: Option<String>,
 ) -> Result<(), String> {
+    // ── Rust-side validation (never trust the webview) ──────────────────────
+    let server = server.trim().to_string();
+    if !companion_core::signaling::server_url_ok(&server) {
+        return Err("invalid server URL — use wss:// or loopback ws://".into());
+    }
+    if !valid_id(&room, 64) {
+        return Err("invalid room".into());
+    }
+    if !valid_id(&user_id, 64) {
+        return Err("invalid user_id".into());
+    }
+    let name = name.trim().to_string();
+    if name.is_empty() || name.chars().count() > 64 || name.chars().any(|c| c.is_control()) {
+        return Err("invalid name (1–64 chars, no control chars)".into());
+    }
+    let token = match token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+        Some(t) if valid_hex(&t, 128) => Some(t),
+        Some(_) => return Err("invalid token".into()),
+        None => None,
+    };
+    let cert_sha256 = match cert_sha256.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()) {
+        Some(c) if c.len() == 64 && valid_hex(&c, 64) => Some(c),
+        Some(_) => return Err("invalid cert_sha256 (64 hex chars)".into()),
+        None => None,
+    };
+    let clean_dev = |d: Option<String>| -> Result<Option<String>, String> {
+        match d.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+            Some(s) if s.len() <= 256 => Ok(Some(s)),
+            Some(_) => Err("invalid device name".into()),
+            None => Ok(None),
+        }
+    };
+    let input_device = clean_dev(input_device)?;
+    let output_device = clean_dev(output_device)?;
+
     let engine = start(
         EngineConfig { server, room, user_id, name, token, cert_sha256, input_device, output_device },
         make_sink(&app),
@@ -150,6 +197,11 @@ fn set_transmit(state: State<AppState>, on: bool) {
 
 #[tauri::command]
 fn send_chat(state: State<AppState>, text: String) {
+    // Bound the message length (defense against oversized webview input).
+    let text: String = text.chars().take(MAX_CHAT_LEN).collect();
+    if text.trim().is_empty() {
+        return;
+    }
     if let Some(s) = state.serverless.lock().unwrap().as_ref() {
         s.send_chat(text);
         return;
@@ -159,18 +211,31 @@ fn send_chat(state: State<AppState>, text: String) {
     }
 }
 
-#[tauri::command]
-fn set_master_volume(state: State<AppState>, volume: f32) {
-    if let Some(e) = state.engine.lock().unwrap().as_ref() {
-        e.set_master_volume(volume);
+/// Clamp incoming volume to a sane gain range (also clamped in core).
+fn clamp_vol(v: f32) -> f32 {
+    if v.is_finite() {
+        v.clamp(0.0, 2.0)
+    } else {
+        1.0
     }
 }
 
 #[tauri::command]
-fn set_peer_volume(state: State<AppState>, user_id: String, volume: f32) {
+fn set_master_volume(state: State<AppState>, volume: f32) {
     if let Some(e) = state.engine.lock().unwrap().as_ref() {
-        e.set_peer_volume(&user_id, volume);
+        e.set_master_volume(clamp_vol(volume));
     }
+}
+
+#[tauri::command]
+fn set_peer_volume(state: State<AppState>, user_id: String, volume: f32) -> Result<(), String> {
+    if !valid_id(&user_id, 64) {
+        return Err("invalid user_id".into());
+    }
+    if let Some(e) = state.engine.lock().unwrap().as_ref() {
+        e.set_peer_volume(&user_id, clamp_vol(volume));
+    }
+    Ok(())
 }
 
 #[tauri::command]

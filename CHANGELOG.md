@@ -2,6 +2,15 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.7 — 2026-06-08
+
+### Fixed
+- **Glare-aware key rotation:** `mesh.rekey()` no longer has both peers tear down
+  and re-offer independently (which could race and leave an answerer stuck). Per
+  pair only the smaller user_id rebuilds + re-offers; the larger side lets
+  `on_offer` swap in the new PC. Added a two-mesh integration test (real ICE/DTLS
+  over a mock relay) proving both links reconnect into fresh PeerConnections.
+
 ## v0.1.6 — 2026-06-08
 
 ### Added

@@ -2,6 +2,15 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.13 — 2026-06-08
+
+### Fixed
+- **Signaling dropping while idle**: the WebSocket had no heartbeat, so after the
+  initial join/offer/ICE burst an idle connection was reaped by proxy/NAT idle
+  timeouts. The client now sends a Ping every 25&nbsp;s (server auto-replies Pong),
+  keeping the link open and detecting dead connections promptly. (Resume button stays
+  as a fallback.)
+
 ## v0.1.12 — 2026-06-08
 
 ### Fixed

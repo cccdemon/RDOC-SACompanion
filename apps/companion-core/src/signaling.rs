@@ -149,10 +149,29 @@ pub async fn connect(url: &str, cert_sha256: Option<&str>) -> Result<Signaling> 
     let (in_tx, in_rx) = mpsc::unbounded_channel::<ServerMsg>();
 
     tokio::spawn(async move {
-        while let Some(m) = out_rx.recv().await {
-            if let Ok(s) = serde_json::to_string(&m) {
-                if sink.send(Message::Text(s)).await.is_err() {
-                    break;
+        // Heartbeat: an idle signaling WS is otherwise reaped by proxy/NAT idle
+        // timeouts. Ping every 25s (the server auto-replies Pong) to keep it open
+        // and to detect a dead connection promptly.
+        let mut ping = tokio::time::interval(std::time::Duration::from_secs(25));
+        ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                m = out_rx.recv() => {
+                    match m {
+                        Some(m) => {
+                            if let Ok(s) = serde_json::to_string(&m) {
+                                if sink.send(Message::Text(s)).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = ping.tick() => {
+                    if sink.send(Message::Ping(Vec::new())).await.is_err() {
+                        break;
+                    }
                 }
             }
         }

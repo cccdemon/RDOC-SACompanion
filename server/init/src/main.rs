@@ -96,6 +96,21 @@ async fn main() -> anyhow::Result<()> {
         sessions: Sessions::default(),
     });
 
+    // Session lifecycle: keep a session alive while its room has members,
+    // grace after empty, 24h hard cap. Swept once a minute.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let mut iv = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                iv.tick().await;
+                state.sessions.reap(|room| {
+                    state.rooms.lock().unwrap().get(room).map(|r| !r.is_empty()).unwrap_or(false)
+                });
+            }
+        });
+    }
+
     let app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/healthz", get(|| async { "ok" }))

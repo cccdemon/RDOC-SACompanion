@@ -10,7 +10,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::Rng;
 
-const TTL_SECS: u64 = 12 * 3600;
+/// Hard cap: a session ends at most 24h after creation, no matter what.
+const MAX_AGE_SECS: u64 = 24 * 3600;
+/// Grace after the room goes empty (covers create→connect + brief reconnects).
+const EMPTY_GRACE_SECS: u64 = 5 * 60;
 const MAX_ATTEMPTS: u32 = 6; // wrong-PIN tries before the code locks
 
 pub struct Session {
@@ -18,6 +21,9 @@ pub struct Session {
     pub token: Option<String>,
     pin: String,
     created: u64,
+    /// Last time the room had ≥1 connected member (init = created, so the host
+    /// has the grace window to connect before it counts as empty).
+    last_active: u64,
     attempts: u32,
 }
 
@@ -75,15 +81,15 @@ impl Sessions {
         let room = format!("squad-{}", rand_hex(8)); // 64-bit random room name
         let token = token_for(&room);
         let pin = rand_pin();
+        let t = now();
         let mut map = self.inner.lock().unwrap();
-        reap(&mut map);
         let mut code = rand_code();
         while map.contains_key(&code) {
             code = rand_code();
         }
         map.insert(
             code.clone(),
-            Session { room: room.clone(), token: token.clone(), pin: pin.clone(), created: now(), attempts: 0 },
+            Session { room: room.clone(), token: token.clone(), pin: pin.clone(), created: t, last_active: t, attempts: 0 },
         );
         (code, pin, room, token)
     }
@@ -91,21 +97,34 @@ impl Sessions {
     /// Resolve a code with a PIN. Rate-limited per code.
     pub fn join(&self, code: &str, pin: &str) -> Result<(String, Option<String>), JoinError> {
         let mut map = self.inner.lock().unwrap();
-        reap(&mut map);
         let s = map.get_mut(code).ok_or(JoinError::NotFound)?;
         if s.attempts >= MAX_ATTEMPTS {
             return Err(JoinError::Locked);
         }
         if ct_eq(s.pin.as_bytes(), pin.as_bytes()) {
+            s.last_active = now(); // a successful join keeps it alive
             Ok((s.room.clone(), s.token.clone()))
         } else {
             s.attempts += 1;
             Err(JoinError::BadPin)
         }
     }
-}
 
-fn reap(map: &mut HashMap<String, Session>) {
-    let n = now();
-    map.retain(|_, s| n.saturating_sub(s.created) < TTL_SECS);
+    /// Lifecycle sweep (call periodically). A session is kept while its room has
+    /// connected members; once empty it survives EMPTY_GRACE, and never past
+    /// MAX_AGE. `room_nonempty(room)` reports live membership.
+    pub fn reap<F: Fn(&str) -> bool>(&self, room_nonempty: F) {
+        let n = now();
+        let mut map = self.inner.lock().unwrap();
+        map.retain(|_, s| {
+            if n.saturating_sub(s.created) >= MAX_AGE_SECS {
+                return false; // 24h hard cap
+            }
+            if room_nonempty(&s.room) {
+                s.last_active = n;
+                return true;
+            }
+            n.saturating_sub(s.last_active) < EMPTY_GRACE_SECS
+        });
+    }
 }

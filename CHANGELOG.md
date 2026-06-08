@@ -2,6 +2,13 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.19 — 2026-06-08
+
+### Changed
+- **Settings split into Einfach / Experte tabs.** Simple = Mikrofon, Ausgabe, Push-to-Talk,
+  Mikrofon-Test. Expert = Session neu verschlüsseln, TURN-Relay-Fallback, Low-Bandwidth,
+  Netzwerk-Selbsttest, Audio-Aufbereitung.
+
 ## v0.1.18 — 2026-06-08
 
 ### Fixed

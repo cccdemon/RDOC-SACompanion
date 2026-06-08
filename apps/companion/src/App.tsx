@@ -131,6 +131,7 @@ export default function App() {
   const [monitoring, setMonitoring] = useState(false);
   const [netCheck, setNetCheck] = useState<{ signaling: boolean; can_send: boolean; can_receive: boolean; stun: boolean } | null>(null);
   const [checking, setChecking] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"simple" | "expert">("simple");
   const [lowBw, setLowBw] = useState<boolean>(() => {
     try {
       return localStorage.getItem("sa.lowbw") === "1";
@@ -475,64 +476,83 @@ export default function App() {
         <b>Einstellungen</b>
         <button className="x" title="Schließen" onClick={() => setShowSettings(false)}>×</button>
       </div>
-      <label>🎤 Mikrofon</label>
-      <select value={audioCfg.input} onChange={(e) => saveAudioCfg({ ...audioCfg, input: e.target.value })}>
-        <option value="">Standard-Gerät</option>
-        {devices.inputs.map((d) => <option key={d} value={d}>{d}</option>)}
-      </select>
-      <label>🔊 Ausgabe</label>
-      <select value={audioCfg.output} onChange={(e) => saveAudioCfg({ ...audioCfg, output: e.target.value })}>
-        <option value="">Standard-Gerät</option>
-        {devices.outputs.map((d) => <option key={d} value={d}>{d}</option>)}
-      </select>
-      <label>🎙 Push-to-Talk</label>
-      <div className="pttrow">
-        <span className="pttcur">{capturing ? "Drücke Taste / Maustaste…" : pttLabel(pttBinding)}</span>
-        <button className="btn sm" onClick={rebindPtt} disabled={capturing}>Neu belegen</button>
-      </div>
-      <div className="sub2" style={{ opacity: 0.7 }}>
-        Push-to-Talk: jede Taste oder Maustaste (RAW). Geräteänderung wird beim nächsten Verbinden aktiv.
+      <div className="settabs">
+        <button className={settingsTab === "simple" ? "on" : ""} onClick={() => setSettingsTab("simple")}>Einfach</button>
+        <button className={settingsTab === "expert" ? "on" : ""} onClick={() => setSettingsTab("expert")}>Experte</button>
       </div>
 
-      <label>🛰 TURN-Relay-Fallback</label>
-      <button className={`btn sm ${relayFb ? "primary" : ""}`} onClick={toggleRelayFb}>
-        {relayFb ? "An (nutzt Relay falls nötig)" : "Aus (nur direkt/STUN)"}
-      </button>
-      <div className="sub2" style={{ opacity: 0.7 }}>
-        Aus = nie über einen Relay; bei striktem NAT ggf. keine Verbindung. Greift beim nächsten Verbinden.
-      </div>
+      {settingsTab === "simple" && (
+        <>
+          <label>🎤 Mikrofon</label>
+          <select value={audioCfg.input} onChange={(e) => saveAudioCfg({ ...audioCfg, input: e.target.value })}>
+            <option value="">Standard-Gerät</option>
+            {devices.inputs.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <label>🔊 Ausgabe</label>
+          <select value={audioCfg.output} onChange={(e) => saveAudioCfg({ ...audioCfg, output: e.target.value })}>
+            <option value="">Standard-Gerät</option>
+            {devices.outputs.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <label>🎙 Push-to-Talk</label>
+          <div className="pttrow">
+            <span className="pttcur">{capturing ? "Drücke Taste / Maustaste…" : pttLabel(pttBinding)}</span>
+            <button className="btn sm" onClick={rebindPtt} disabled={capturing}>Neu belegen</button>
+          </div>
+          <div className="sub2" style={{ opacity: 0.7 }}>
+            Push-to-Talk: jede Taste oder Maustaste (RAW). Geräteänderung wird beim nächsten Verbinden aktiv.
+          </div>
 
-      <label>🐢 Low-Bandwidth-Modus</label>
-      <button className={`btn sm ${lowBw ? "primary" : ""}`} onClick={toggleLowBw}>
-        {lowBw ? "An — ≈14 kbps + Stille-Unterdrückung" : "Aus"}
-      </button>
-      <div className="sub2" style={{ opacity: 0.7 }}>
-        Niedrige Opus-Bitrate + DTX (Stille sendet nichts) für schwache Verbindungen.
-      </div>
-
-      <label>🛰 Netzwerk-Selbsttest</label>
-      <button className="btn sm" onClick={runNetCheck} disabled={checking}>
-        {checking ? "Teste… (bis ~10 s)" : "Test starten"}
-      </button>
-      {netCheck && (
-        <div className="netcheck">
-          <div>Signaling-Server: {netCheck.signaling ? "✅ ja" : "❌ nein"}</div>
-          <div>Kann senden: {netCheck.can_send ? "✅ ja" : "❌ nein"}</div>
-          <div>Kann empfangen: {netCheck.can_receive ? "✅ ja" : "❌ nein"}</div>
-          <div>Internet / STUN: {netCheck.stun ? "✅ ja" : "❌ nein"}</div>
-        </div>
+          <label>🎧 Mikrofon-Test</label>
+          <button className={`btn sm ${monitoring ? "primary" : ""}`} onClick={toggleMonitor}>
+            {monitoring ? "■ Test stoppen" : "▶ Eigenwiedergabe"}
+          </button>
+          <div className="sub2" style={{ opacity: 0.7 }}>
+            Hörst dein eigenes Mikrofon (inkl. Aufbereitung). Headset empfohlen (sonst Rückkopplung).
+          </div>
+        </>
       )}
 
-      <label>🎧 Mikrofon-Test</label>
-      <button className={`btn sm ${monitoring ? "primary" : ""}`} onClick={toggleMonitor}>
-        {monitoring ? "■ Test stoppen" : "▶ Eigenwiedergabe"}
-      </button>
-      <div className="sub2" style={{ opacity: 0.7 }}>
-        Hörst dein eigenes Mikrofon (inkl. Aufbereitung). Headset empfohlen (sonst Rückkopplung).
-      </div>
+      {settingsTab === "expert" && (
+        <>
+          <label>🔑 Session-Verschlüsselung</label>
+          <button className="btn sm" onClick={rotateKey} disabled={rotating || !connected}>
+            {rotating ? "⏳ Verschlüssele neu…" : `Session neu verschlüsseln · #${keyInfo.gen}`}
+          </button>
+          <div className="sub2" style={{ opacity: 0.7 }}>
+            Erzeugt für alle Teilnehmer neue Schlüssel (DTLS-SRTP re-handshake). Nur während einer Session.
+          </div>
 
-      <label>🎚 Audio-Aufbereitung</label>
-      <div className="dsp">
+          <label>🛰 TURN-Relay-Fallback</label>
+          <button className={`btn sm ${relayFb ? "primary" : ""}`} onClick={toggleRelayFb}>
+            {relayFb ? "An (nutzt Relay falls nötig)" : "Aus (nur direkt/STUN)"}
+          </button>
+          <div className="sub2" style={{ opacity: 0.7 }}>
+            Aus = nie über einen Relay; bei striktem NAT ggf. keine Verbindung. Greift beim nächsten Verbinden.
+          </div>
+
+          <label>🐢 Low-Bandwidth-Modus</label>
+          <button className={`btn sm ${lowBw ? "primary" : ""}`} onClick={toggleLowBw}>
+            {lowBw ? "An — ≈14 kbps + Stille-Unterdrückung" : "Aus"}
+          </button>
+          <div className="sub2" style={{ opacity: 0.7 }}>
+            Niedrige Opus-Bitrate + DTX (Stille sendet nichts) für schwache Verbindungen.
+          </div>
+
+          <label>🧪 Netzwerk-Selbsttest</label>
+          <button className="btn sm" onClick={runNetCheck} disabled={checking}>
+            {checking ? "Teste… (bis ~10 s)" : "Test starten"}
+          </button>
+          {netCheck && (
+            <div className="netcheck">
+              <div>Signaling-Server: {netCheck.signaling ? "✅ ja" : "❌ nein"}</div>
+              <div>Kann senden: {netCheck.can_send ? "✅ ja" : "❌ nein"}</div>
+              <div>Kann empfangen: {netCheck.can_receive ? "✅ ja" : "❌ nein"}</div>
+              <div>Internet / STUN: {netCheck.stun ? "✅ ja" : "❌ nein"}</div>
+            </div>
+          )}
+
+          <label>🎚 Audio-Aufbereitung</label>
+          <div className="dsp">
         <div className="dsphead">
           <label className="chk"><input type="checkbox" checked={dsp.gate} onChange={(e) => updateDsp({ gate: e.target.checked })} /> Noise Gate</label>
         </div>
@@ -570,6 +590,8 @@ export default function App() {
           <span className="vval">{Math.round(dsp.limiter_ceiling * 100)}%</span>
         </div>
       </div>
+        </>
+      )}
     </div>
     </div>
   );

@@ -218,3 +218,8 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 
 /* Network self-check results */
 .netcheck { background: rgba(0,0,0,.25); border: 1px solid #1e293b; border-radius: 7px; padding: .5rem .7rem; margin-top: .4rem; font-size: .85rem; line-height: 1.7; }
+
+/* Settings tabs (simple / expert) */
+.settabs { display: flex; gap: .4rem; margin: .3rem 0 .6rem; }
+.settabs button { flex: 1; background: #131722; color: #9aa3ad; border: 1px solid #242833; border-radius: 6px; padding: .35rem; font-size: .85rem; cursor: pointer; }
+.settabs button.on { background: #16323f; color: #d6f0ff; border-color: #2f6f86; }

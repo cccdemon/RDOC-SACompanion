@@ -543,7 +543,7 @@ export default function App() {
             {monitoring ? "■ Test stoppen" : "▶ Eigenwiedergabe"}
           </button>
           <div className="sub2" style={{ opacity: 0.7 }}>
-            Hörst dein eigenes Mikrofon (inkl. Aufbereitung). Headset empfohlen (sonst Rückkopplung).
+            Du hörst dein eigenes Mikrofon (inkl. Aufbereitung). Headset empfohlen (sonst Rückkopplung).
           </div>
         </>
       )}

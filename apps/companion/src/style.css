@@ -223,3 +223,11 @@ section { background: var(--bg); padding: 14px 16px; display: flex; flex-directi
 .settabs { display: flex; gap: .4rem; margin: .3rem 0 .6rem; }
 .settabs button { flex: 1; background: #131722; color: #9aa3ad; border: 1px solid #242833; border-radius: 6px; padding: .35rem; font-size: .85rem; cursor: pointer; }
 .settabs button.on { background: #16323f; color: #d6f0ff; border-color: #2f6f86; }
+
+/* Send/receive activity light (when kbps hidden) */
+.txrx { display: inline-flex; align-items: center; gap: .35rem; }
+.txrxlbl { color: #9aa3ad; font-size: .8rem; }
+.txlight { width: 13px; height: 13px; border-radius: 50%; background: #2a2f3a; box-shadow: inset 0 0 0 1px #000; }
+.txlight.send { background: #ef3b3b; box-shadow: 0 0 6px #ef3b3b; }
+.txlight.recv { background: #2ec26a; box-shadow: 0 0 6px #2ec26a; }
+.txlight.both { background: linear-gradient(90deg, #ef3b3b 0 50%, #2ec26a 50% 100%); box-shadow: 0 0 6px rgba(239,59,59,.6), 0 0 6px rgba(46,194,106,.6); }

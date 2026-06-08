@@ -132,6 +132,13 @@ export default function App() {
   const [netCheck, setNetCheck] = useState<{ signaling: boolean; can_send: boolean; can_receive: boolean; stun: boolean } | null>(null);
   const [checking, setChecking] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"simple" | "expert">("simple");
+  const [showKbps, setShowKbps] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("sa.showkbps") !== "0"; // default: show
+    } catch {
+      return true;
+    }
+  });
   const [lowBw, setLowBw] = useState<boolean>(() => {
     try {
       return localStorage.getItem("sa.lowbw") === "1";
@@ -213,6 +220,17 @@ export default function App() {
       .then((r) => setNetCheck(r))
       .catch(() => setNetCheck(null))
       .finally(() => setChecking(false));
+  };
+  const toggleKbps = () => {
+    setShowKbps((v) => {
+      const nv = !v;
+      try {
+        localStorage.setItem("sa.showkbps", nv ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return nv;
+    });
   };
   const toggleMonitor = () => {
     setMonitoring((m) => {
@@ -530,6 +548,14 @@ export default function App() {
             Aus = nie über einen Relay; bei striktem NAT ggf. keine Verbindung. Greift beim nächsten Verbinden.
           </div>
 
+          <label>📊 Bandbreiten-Anzeige (kbps)</label>
+          <button className={`btn sm ${showKbps ? "primary" : ""}`} onClick={toggleKbps}>
+            {showKbps ? "Anzeigen" : "Ausgeblendet (Sende-/Empfangslicht)"}
+          </button>
+          <div className="sub2" style={{ opacity: 0.7 }}>
+            Aus = statt kbps ein kleines Sende-(rot)/Empfangs-(grün)-Licht.
+          </div>
+
           <label>🐢 Low-Bandwidth-Modus</label>
           <button className={`btn sm ${lowBw ? "primary" : ""}`} onClick={toggleLowBw}>
             {lowBw ? "An — ≈14 kbps + Stille-Unterdrückung" : "Aus"}
@@ -682,6 +708,8 @@ export default function App() {
   const up = net ? net.up : estPeers * 32;
   const down = net ? net.down : estPeers * 32;
   const measured = net != null;
+  // Receiving = measurable incoming audio, else any peer marked speaking.
+  const receiving = net ? net.down > 4 : participants.some((p) => !p.you && p.speaking);
 
   return (
     <div className="screen app">
@@ -706,9 +734,22 @@ export default function App() {
 
       <div className="netbar">
         <span>P2P: <b>{p2pCount}</b></span>
-        <span>↑ {measured ? "" : "~"}{up} kbps</span>
-        <span>↓ {measured ? "" : "~"}{down} kbps</span>
-        <span className="netest">({measured ? "gemessen" : "geschätzt"})</span>
+        {showKbps ? (
+          <>
+            <span>↑ {measured ? "" : "~"}{up} kbps</span>
+            <span>↓ {measured ? "" : "~"}{down} kbps</span>
+            <span className="netest">({measured ? "gemessen" : "geschätzt"})</span>
+          </>
+        ) : (
+          <span className="txrx" title="Funk: rot = Senden, grün = Empfangen">
+            <span
+              className={`txlight ${
+                transmitting && receiving ? "both" : transmitting ? "send" : receiving ? "recv" : ""
+              }`}
+            />
+            <span className="txrxlbl">Funk</span>
+          </span>
+        )}
         {lowBw && <span className="lowbw" title="Low-Bandwidth-Modus aktiv">🐢 Low-BW</span>}
         <button
           className="rekey"

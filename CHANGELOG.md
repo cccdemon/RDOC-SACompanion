@@ -2,6 +2,13 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.20 — 2026-06-08
+
+### Added
+- **Bandwidth (kbps) display can be hidden** (Experte → Bandbreiten-Anzeige). When hidden,
+  the netbar shows a small radio activity light instead: red = sending, green = receiving,
+  split red/green = both at once.
+
 ## v0.1.19 — 2026-06-08
 
 ### Changed

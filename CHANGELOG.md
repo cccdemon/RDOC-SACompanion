@@ -2,6 +2,15 @@
 
 All notable changes to RDOC SquadLink Lite. Tags: `squadlink-lite-v*`.
 
+## v0.1.18 — 2026-06-08
+
+### Fixed
+- **More crackle, root cause #2**: the playback mixer used a fixed `sleep(20ms)` clock,
+  which is ~31ms on Windows (timer granularity) → the playback ring drained → underrun
+  crackle. The mixer is now demand-driven (keeps ~60ms buffered, independent of sleep
+  precision). The mix sum is also soft-limited (tanh) so several simultaneous speakers
+  can't hard-clip.
+
 ## v0.1.17 — 2026-06-08
 
 ### Added

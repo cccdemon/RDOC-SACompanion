@@ -439,48 +439,54 @@ pub fn decode_loop(mut rx: UnboundedReceiver<(String, Bytes)>, mix: MixMap) {
     }
 }
 
-/// 20ms clock: sum each peer's 48k frame (int16 clamp), resample 48k→out, push
-/// to the playback ring.
+/// Demand-driven mixer: keeps the playback ring topped up to ~60ms of audio,
+/// then sleeps briefly. A fixed 20ms sleep is ~31ms on Windows (timer
+/// granularity) → the ring drains → underrun crackle; producing on demand
+/// decouples from sleep precision. Sum is soft-limited (tanh) so several
+/// simultaneous speakers can't hard-clip.
 pub fn mixer_loop(mix: MixMap, play: Buf, out_rate: u32, gains: Arc<Gains>, stop: Arc<AtomicBool>) {
     let mut down = Resampler::new(OPUS_SR, out_rate);
+    let target = out_rate as usize * 60 / 1000; // ~60ms buffered (absorbs OS jitter)
+    let cap = out_rate as usize / 2; // hard cap ~0.5s
     loop {
         if stop.load(Ordering::SeqCst) {
             return;
         }
-        std::thread::sleep(Duration::from_millis(20));
-        let mut mixed = [0i32; FRAME];
-        let mut any = false;
-        {
-            let mut m = mix.lock().unwrap();
-            for (peer, b) in m.iter_mut() {
-                // Take up to one frame; a partially-filled peer contributes what
-                // it has (rest = silence) instead of being dropped → smoother
-                // mix with several simultaneous speakers. Apply this peer's gain.
-                let n = b.len().min(FRAME);
-                if n > 0 {
-                    any = true;
-                    let g = gains.peer_v(peer);
-                    for x in mixed.iter_mut().take(n) {
-                        *x += (b.pop_front().unwrap() as f32 * g) as i32;
+        // Refill the playback ring up to `target`.
+        loop {
+            if play.lock().unwrap().len() >= target {
+                break;
+            }
+            let mut mixed = [0i32; FRAME];
+            {
+                let mut m = mix.lock().unwrap();
+                for (peer, b) in m.iter_mut() {
+                    // Partial frame contributes what it has (rest = silence).
+                    let n = b.len().min(FRAME);
+                    if n > 0 {
+                        let g = gains.peer_v(peer);
+                        for x in mixed.iter_mut().take(n) {
+                            *x += (b.pop_front().unwrap() as f32 * g) as i32;
+                        }
                     }
                 }
             }
+            let master = gains.master_v();
+            // tanh ≈ linear for quiet signals, smoothly saturates near ±1 → no
+            // hard-clip clicks when multiple peers speak at once.
+            let f: Vec<f32> = mixed.iter().map(|&v| (v as f32 * master / 32768.0).tanh()).collect();
+            let mut o: Vec<f32> = Vec::new();
+            down.process(&f, &mut o);
+            {
+                let mut p = play.lock().unwrap();
+                for v in o {
+                    p.push_back((v * 32767.0) as i16);
+                }
+                while p.len() > cap {
+                    p.pop_front();
+                }
+            }
         }
-        if !any {
-            continue;
-        }
-        let master = gains.master_v();
-        let f: Vec<f32> =
-            mixed.iter().map(|&v| (v as f32 * master).clamp(-32768.0, 32767.0) / 32768.0).collect();
-        let mut o: Vec<f32> = Vec::new();
-        down.process(&f, &mut o);
-        let mut p = play.lock().unwrap();
-        for v in o {
-            p.push_back((v.clamp(-1.0, 1.0) * 32767.0) as i16);
-        }
-        let cap = out_rate as usize / 2; // ~0.5s playback cap
-        while p.len() > cap {
-            p.pop_front();
-        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
